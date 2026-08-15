@@ -91,7 +91,7 @@ export class AudioManager {
   // ── State ──────────────────────────────────────────────────────────────────
   private voiceVolume   = 0.9;
   private sfxVolume     = 0.7;
-  private ambianceVolume= 0.18;
+  private ambianceVolume= 0.09;
   private isMuted       = false;
 
   /** Map of preloaded buffers: path → HTMLAudioElement (used as preload cache) */

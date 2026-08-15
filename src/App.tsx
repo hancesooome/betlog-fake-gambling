@@ -8,7 +8,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState<'home' | 'baccarat' | 'parlays'>('home');
 
   return (
-    <AudioProvider config={{ voiceVolume: 0.9, sfxVolume: 0.7, ambianceVolume: 0.18 }}>
+    <AudioProvider config={{ voiceVolume: 0.9, sfxVolume: 0.7, ambianceVolume: 0.09 }}>
       <div className="w-full min-h-screen bg-[#07080a] text-white">
         {currentView === 'home' && (
           <HomePage
