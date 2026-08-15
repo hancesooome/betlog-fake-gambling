@@ -1171,7 +1171,7 @@ let globalLastTickPlayed = -1;
               </button>
               <button
                 onClick={() => setActiveTab('History')}
-                className={`text-xs md:text-sm font-bold tracking-wide pb-2 transition-colors cursor-pointer ${
+                className={`text-xs md:text-sm font-bold tracking-wide relative pb-2 transition-colors cursor-pointer ${
                   activeTab === 'History' ? 'text-[#F5BA15]' : 'text-zinc-400 hover:text-zinc-200'
                 }`}
               >
@@ -1182,7 +1182,7 @@ let globalLastTickPlayed = -1;
               </button>
               <button
                 onClick={() => setActiveTab('Chat')}
-                className={`text-xs md:text-sm font-bold tracking-wide pb-2 transition-colors cursor-pointer ${
+                className={`text-xs md:text-sm font-bold tracking-wide relative pb-2 transition-colors cursor-pointer ${
                   activeTab === 'Chat' ? 'text-[#F5BA15]' : 'text-zinc-400 hover:text-zinc-200'
                 }`}
               >
