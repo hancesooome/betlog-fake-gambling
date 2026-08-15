@@ -101,6 +101,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
   const [showResultBanner, setShowResultBanner] = useState<boolean>(false);
   const [winPayoutPulse, setWinPayoutPulse] = useState<boolean>(false);
   const [winArea, setWinArea] = useState<MainBetKey | null>(null);
+  const [winSideBets, setWinSideBets] = useState<Set<SideBetKey>>(new Set());
   const [lastTickPlayed, setLastTickPlayed] = useState<number>(0);
   
 // Module-level variable to ensure the tick sound plays exactly once per second,
