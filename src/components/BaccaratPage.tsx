@@ -8,6 +8,7 @@ import {
   Bell,
   Maximize2,
   Volume2,
+  VolumeX,
   Settings,
   ChevronDown,
   Plus,
@@ -21,6 +22,9 @@ import {
   Dices,
   User,
 } from 'lucide-react';
+import { useDealerVoice } from '../hooks/useDealerVoice';
+import { useSoundEffects } from '../hooks/useSoundEffects';
+import { useAudio } from '../hooks/useAudio';
 
 interface BaccaratPageProps {
   onBackToHome: () => void;
@@ -35,6 +39,11 @@ const ASSETS = {
 };
 
 export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
+  // ── Audio hooks ────────────────────────────────────────────────────────────
+  const { playVoice } = useDealerVoice();
+  const { playSfx }   = useSoundEffects();
+  const { isMuted, toggleMute } = useAudio();
+
   // Game Play States
   const [balance, setBalance] = useState<number>(1250);
   const [betAmounts, setBetAmounts] = useState<{ player: number; tie: number; banker: number }>({
@@ -124,6 +133,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
       showToast('Insufficient credits!', 'error');
       return;
     }
+    playSfx('CHIP_PLACE');
     setBalance(prev => prev - selectedChip);
     setBetAmounts(prev => ({
       ...prev,
@@ -134,6 +144,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
   const handleClearBets = () => {
     if (gameState !== 'betting') return;
     const totalReturned = betAmounts.player + betAmounts.tie + betAmounts.banker;
+    if (totalReturned > 0) playSfx('CHIP_STACK');
     setBalance(prev => prev + totalReturned);
     setBetAmounts({ player: 0, tie: 0, banker: 0 });
     setPlacedBets({ player: 0, tie: 0, banker: 0 });
@@ -148,9 +159,12 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
     }
     setPlacedBets({ ...betAmounts });
     showToast('Bets confirmed! Dealing cards...', 'success');
+    // ── Audio: bets closed ──
+    playSfx('BET_CLOSED');
+    playVoice('BETTING_CLOSED');
     setGameState('dealing');
 
-    // Simulate dealing after 1.5 seconds
+    // Deal cards after voice finishes (~1.5 s)
     setTimeout(() => {
       simulateDeal();
     }, 1500);
@@ -199,6 +213,12 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
     let currentP = [p1, p2];
     let currentB = [b1, b2];
 
+    // ── Audio: card deal SFX for initial 4 cards ──
+    playSfx('CARD_DEAL');
+    setTimeout(() => playSfx('CARD_DEAL'), 200);
+    setTimeout(() => playSfx('CARD_DEAL'), 400);
+    setTimeout(() => playSfx('CARD_DEAL'), 600);
+
     setPlayerCards(currentP);
     setBankerCards(currentB);
 
@@ -207,7 +227,10 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
 
     // Standard Baccarat Third Card Rule logic
     let extraDealTime = 0;
-    
+
+    // Detect naturals (8 or 9) early for voice
+    const isNatural = pScore >= 8 || bScore >= 8;
+
     // If neither has 8 or 9 (Natural win)
     if (pScore < 8 && bScore < 8) {
       // Player draws if score is 0-5
@@ -220,6 +243,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
         pScore = (pScore + pThirdCard.score) % 10;
         extraDealTime = 1000;
         setTimeout(() => {
+          playSfx('CARD_FLIP');
           setPlayerCards([...currentP]);
         }, 800);
       }
@@ -243,6 +267,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
         bScore = (bScore + bThird.score) % 10;
         extraDealTime = 1800;
         setTimeout(() => {
+          playSfx('CARD_FLIP');
           setBankerCards([...currentB]);
         }, 1500);
       }
@@ -269,10 +294,23 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
         totalPayout += placedBets.player * 2;
       }
       if (result === 'banker' && placedBets.banker > 0) {
-        totalPayout += placedBets.banker * 2; // Simple 1:1 payout for fake money simplicity
+        totalPayout += placedBets.banker * 2;
       }
       if (result === 'tie' && placedBets.tie > 0) {
-        totalPayout += placedBets.tie * 9; // 8:1 payout pays original + 8x
+        totalPayout += placedBets.tie * 9;
+      }
+
+      // ── Audio: result voice line ──
+      if (isNatural) {
+        // Natural eight or nine — use the correct voice
+        const naturalScore = Math.max(pScore, bScore);
+        playVoice(naturalScore >= 9 ? 'RESULT_NATURAL_NINE' : 'RESULT_NATURAL_EIGHT');
+      } else if (result === 'player') {
+        playVoice('RESULT_PLAYER');
+      } else if (result === 'banker') {
+        playVoice('RESULT_BANKER');
+      } else {
+        playVoice('RESULT_TIE');
       }
 
       if (totalPayout > 0) {
@@ -316,6 +354,9 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
         setGameState('betting');
         setBetAmounts({ player: 0, tie: 0, banker: 0 });
         setPlacedBets({ player: 0, tie: 0, banker: 0 });
+        // ── Audio: next round opens ──
+        playSfx('BET_OPEN');
+        playVoice('BETTING_OPEN');
       }, 4000);
 
     }, 1500 + extraDealTime);
@@ -413,6 +454,19 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
           <button className="text-zinc-400 hover:text-white transition-colors p-1 relative cursor-pointer">
             <Bell className="w-5 h-5" />
             <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-[#ef4444] rounded-full" />
+          </button>
+
+          {/* Mute / Unmute Toggle */}
+          <button
+            onClick={toggleMute}
+            title={isMuted ? 'Unmute audio' : 'Mute audio'}
+            className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+              isMuted
+                ? 'bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-white hover:border-zinc-500'
+                : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-600'
+            }`}
+          >
+            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
 
           {/* User Profile Avatar */}
@@ -628,6 +682,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
                   showToast('Insufficient balance to double bets!', 'error');
                   return;
                 }
+                playSfx('CHIP_STACK');
                 setBalance(prev => prev - totalAdditional);
                 setBetAmounts(doubledBets);
               }} className="flex-1 sm:flex-initial bg-[#121620] hover:bg-[#1a202e] border border-[#242b3d] text-white font-bold text-xs md:text-sm px-4 md:px-5 py-2.5 md:py-3 rounded-xl transition-colors active:scale-95 shadow-md cursor-pointer">
