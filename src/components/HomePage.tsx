@@ -19,6 +19,7 @@ import {
 
 interface HomePageProps {
   onOpenBaccarat: () => void;
+  onOpenParlays: () => void;
 }
 
 const ASSETS = {
@@ -37,7 +38,7 @@ const ASSETS = {
   avatar5: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&auto=format&fit=crop&q=80',
 };
 
-export const HomePage: React.FC<HomePageProps> = ({ onOpenBaccarat }) => {
+export const HomePage: React.FC<HomePageProps> = ({ onOpenBaccarat, onOpenParlays }) => {
   return (
     <div className="min-h-screen bg-black text-white antialiased flex flex-col font-sans select-none pb-20 md:pb-8">
       {/* Top Navigation Bar */}
@@ -63,7 +64,12 @@ export const HomePage: React.FC<HomePageProps> = ({ onOpenBaccarat }) => {
             >
               Live Casino
             </button>
-            <a href="#sports" className="hover:text-white transition-colors">Sports</a>
+            <button
+              onClick={onOpenParlays}
+              className="hover:text-white transition-colors text-left cursor-pointer"
+            >
+              Sports
+            </button>
             <a href="#bonanza" className="hover:text-white transition-colors">Bonanza</a>
             <a href="#promos" className="hover:text-white transition-colors">Promos</a>
             <a href="#vip" className="text-amber-400 flex items-center gap-1 font-semibold hover:text-amber-300 transition-colors">
@@ -283,7 +289,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onOpenBaccarat }) => {
               </div>
 
               {/* Card 3: SPORTS PARLAYS */}
-              <div className="group relative h-40 sm:h-48 rounded-2xl overflow-hidden flex flex-col justify-end p-4 cursor-pointer border border-zinc-800/80 bg-zinc-950/40 hover:border-emerald-500/40 transition-all duration-300 shadow-xl">
+              <div
+                onClick={onOpenParlays}
+                className="group relative h-40 sm:h-48 rounded-2xl overflow-hidden flex flex-col justify-end p-4 cursor-pointer border border-zinc-800/80 bg-zinc-950/40 hover:border-emerald-500/40 transition-all duration-300 shadow-xl"
+              >
                 <div className="absolute inset-0 z-0">
                   <img
                     src={ASSETS.parlay}
@@ -546,7 +555,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onOpenBaccarat }) => {
           <Tv className="w-5 h-5" />
           <span className="text-[10px]">Live Casino</span>
         </button>
-        <button className="flex flex-col items-center gap-1 text-zinc-500 hover:text-zinc-300">
+        <button
+          onClick={onOpenParlays}
+          className="flex flex-col items-center gap-1 text-zinc-500 hover:text-zinc-300"
+        >
           <Dices className="w-5 h-5" />
           <span className="text-[10px]">Sports</span>
         </button>

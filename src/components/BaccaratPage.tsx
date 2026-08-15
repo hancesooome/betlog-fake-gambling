@@ -43,6 +43,7 @@ const ZERO_BETS: Record<AllBetKey, number> = {
 
 interface BaccaratPageProps {
   onBackToHome: () => void;
+  onOpenParlays: () => void;
 }
 
 const ASSETS = {
@@ -53,7 +54,7 @@ const ASSETS = {
   avatar3: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
 };
 
-export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
+export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpenParlays }) => {
   // ── Audio hooks ────────────────────────────────────────────────────────────
   const { playVoice } = useDealerVoice();
   const { playSfx }   = useSoundEffects();
@@ -591,7 +592,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
             >
               Live Casino
             </button>
-            <button onClick={onBackToHome} className="hover:text-white transition-colors cursor-pointer">Sports</button>
+            <button onClick={onOpenParlays} className="hover:text-white transition-colors cursor-pointer">Sports</button>
             <button onClick={onBackToHome} className="hover:text-white transition-colors cursor-pointer">Bonanza</button>
             <button onClick={onBackToHome} className="hover:text-white transition-colors cursor-pointer">Promos</button>
             <button onClick={onBackToHome} className="text-amber-400 flex items-center gap-1 font-semibold hover:text-amber-300 transition-colors cursor-pointer">
@@ -1323,7 +1324,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
           <Tv className="w-5 h-5 fill-amber-400" />
           <span className="text-[10px] font-bold">Live Casino</span>
         </button>
-        <button onClick={onBackToHome} className="flex flex-col items-center gap-1 text-zinc-500 hover:text-zinc-300 cursor-pointer">
+        <button onClick={onOpenParlays} className="flex flex-col items-center gap-1 text-zinc-500 hover:text-zinc-300 cursor-pointer">
           <Dices className="w-5 h-5" />
           <span className="text-[10px]">Sports</span>
         </button>
