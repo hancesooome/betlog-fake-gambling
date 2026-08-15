@@ -14,6 +14,12 @@ import {
   RotateCcw,
   Send,
   ArrowLeft,
+  Crown,
+  Home,
+  Gamepad2,
+  Tv,
+  Dices,
+  User,
 } from 'lucide-react';
 
 interface BaccaratPageProps {
@@ -65,11 +71,12 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
   };
 
   return (
-    <div className="min-h-screen bg-[#030407] text-white antialiased flex flex-col font-sans select-none pb-20 md:pb-8">
-      {/* Main Brand Top Navigation Bar */}
+    <div className="min-h-screen bg-black text-white antialiased flex flex-col font-sans select-none pb-20 md:pb-8">
+      {/* Top Navigation Bar */}
       <header className="w-full bg-black px-4 md:px-8 py-4 flex items-center justify-between border-b border-zinc-900 sticky top-0 z-40">
+        {/* Left: Brand Logo & Navigation Links */}
         <div className="flex items-center gap-10">
-          {/* Brand Logo & Back Action */}
+          {/* Brand Logo & Back to Home */}
           <button
             onClick={onBackToHome}
             className="flex items-center gap-3 cursor-pointer select-none"
@@ -85,15 +92,33 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
             />
           </button>
 
+          {/* Desktop Navigation Links */}
+          <nav className="hidden md:flex items-center gap-7 text-[15px] font-medium text-zinc-400">
+            <button onClick={onBackToHome} className="hover:text-white transition-colors cursor-pointer">Games</button>
+            <button
+              onClick={() => {}}
+              className="text-white font-semibold transition-colors text-left cursor-pointer"
+            >
+              Live Casino
+            </button>
+            <button onClick={onBackToHome} className="hover:text-white transition-colors cursor-pointer">Sports</button>
+            <button onClick={onBackToHome} className="hover:text-white transition-colors cursor-pointer">Bonanza</button>
+            <button onClick={onBackToHome} className="hover:text-white transition-colors cursor-pointer">Promos</button>
+            <button onClick={onBackToHome} className="text-amber-400 flex items-center gap-1 font-semibold hover:text-amber-300 transition-colors cursor-pointer">
+              <Crown className="w-4 h-4 fill-amber-400 text-amber-400" />
+              <span>VIP</span>
+            </button>
+          </nav>
+        </div>
+
+        {/* Right: Balance, Notifications, Profile */}
+        <div className="flex items-center gap-4">
           {/* Table ID Display */}
-          <div className="hidden md:flex items-center gap-2 cursor-pointer text-zinc-300 hover:text-white transition-colors bg-zinc-950 px-3 py-1.5 rounded-lg border border-zinc-900">
+          <div className="hidden lg:flex items-center gap-2 cursor-pointer text-zinc-300 hover:text-white transition-colors bg-zinc-950 px-3 py-1.5 rounded-lg border border-zinc-900">
             <span className="text-xs font-semibold tracking-wide">Baccarat #10248</span>
             <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />
           </div>
-        </div>
 
-        {/* Right Controls & Balance (matches main layout) */}
-        <div className="flex items-center gap-4">
           {/* Balance Pill */}
           <div className="bg-[#0f0e0a]/80 border border-amber-500/20 rounded-lg pl-3 pr-1 py-1 flex items-center gap-3">
             <span className="text-amber-400 font-extrabold text-sm tracking-wide">
@@ -104,13 +129,8 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
             </button>
           </div>
 
-          <button className="text-zinc-400 hover:text-white p-1 transition-colors cursor-pointer">
-            <Settings className="w-5 h-5" />
-          </button>
-          <button className="text-zinc-400 hover:text-white p-1 transition-colors cursor-pointer">
-            <Volume2 className="w-5 h-5" />
-          </button>
-          <button className="text-zinc-400 hover:text-white p-1 relative cursor-pointer">
+          {/* Bell Icon with orange dot */}
+          <button className="text-zinc-400 hover:text-white transition-colors p-1 relative cursor-pointer">
             <Bell className="w-5 h-5" />
             <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-[#ef4444] rounded-full" />
           </button>
@@ -128,7 +148,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
       </header>
 
       {/* Main Grid: Game Video & Betting (Left) + Roadmap & Chat (Right) */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 max-w-[1560px] w-full mx-auto">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 max-w-[1560px] w-full mx-auto p-4 md:p-6">
         {/* LEFT COLUMN: Live Feed + Betting Spots + Chips (Spans 8 cols) */}
         <div className="lg:col-span-8 flex flex-col gap-3">
           {/* Live Video / Dealer Canvas */}
@@ -492,6 +512,33 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
             </form>
           </div>
         </div>
+      </div>
+
+      {/* Mobile Bottom Navigation Bar */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-[#07080a] border-t border-zinc-950 px-4 py-2.5 flex items-center justify-around z-50">
+        <button onClick={onBackToHome} className="flex flex-col items-center gap-1 text-zinc-500 hover:text-zinc-300 cursor-pointer">
+          <Home className="w-5 h-5" />
+          <span className="text-[10px]">Home</span>
+        </button>
+        <button onClick={onBackToHome} className="flex flex-col items-center gap-1 text-zinc-500 hover:text-zinc-300 cursor-pointer">
+          <Gamepad2 className="w-5 h-5" />
+          <span className="text-[10px]">Games</span>
+        </button>
+        <button
+          onClick={() => {}}
+          className="flex flex-col items-center gap-1 text-amber-400 cursor-pointer"
+        >
+          <Tv className="w-5 h-5 fill-amber-400" />
+          <span className="text-[10px] font-bold">Live Casino</span>
+        </button>
+        <button onClick={onBackToHome} className="flex flex-col items-center gap-1 text-zinc-500 hover:text-zinc-300 cursor-pointer">
+          <Dices className="w-5 h-5" />
+          <span className="text-[10px]">Sports</span>
+        </button>
+        <button onClick={onBackToHome} className="flex flex-col items-center gap-1 text-zinc-500 hover:text-zinc-300 cursor-pointer">
+          <User className="w-5 h-5" />
+          <span className="text-[10px]">Profile</span>
+        </button>
       </div>
     </div>
   );
