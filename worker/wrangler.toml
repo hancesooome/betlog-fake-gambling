@@ -1,0 +1,48 @@
+name = "betlog-baccarat-worker"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# ─── Environment Variables ────────────────────────────────────────────────────
+
+[vars]
+ENVIRONMENT = "production"
+TABLE_ID    = "BETLOG-BACCARAT-1"
+
+# ─── Dev Override ─────────────────────────────────────────────────────────────
+
+[dev]
+port = 8787
+local_protocol = "http"
+
+# ─── Future: KV Namespace ─────────────────────────────────────────────────────
+# Uncomment when adding persistent data (chat history, user sessions, etc.)
+#
+# [[kv_namespaces]]
+# binding = "BETLOG_KV"
+# id      = "YOUR_KV_NAMESPACE_ID"
+# preview_id = "YOUR_PREVIEW_KV_NAMESPACE_ID"
+
+# ─── Future: Durable Objects ──────────────────────────────────────────────────
+# Uncomment to enable stateful multi-table support with real-time sync.
+#
+# [[durable_objects.bindings]]
+# name       = "BACCARAT_TABLE"
+# class_name = "BaccaratTable"
+#
+# [[migrations]]
+# tag = "v1"
+# new_classes = ["BaccaratTable"]
+
+# ─── Future: AI Gateway (Dealer Avatar) ───────────────────────────────────────
+# Uncomment to enable Cloudflare AI Gateway for the AI dealer service.
+#
+# [ai]
+# binding = "AI"
+
+# ─── Routes ───────────────────────────────────────────────────────────────────
+# Uncomment and update after deploying:
+#
+# routes = [
+#   { pattern = "betlog.example.com/api/*", zone_name = "betlog.example.com" }
+# ]

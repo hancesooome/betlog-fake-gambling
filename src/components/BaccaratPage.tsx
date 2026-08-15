@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Bell,
   Maximize2,
@@ -25,6 +25,7 @@ import {
 import { useDealerVoice } from '../hooks/useDealerVoice';
 import { useSoundEffects } from '../hooks/useSoundEffects';
 import { useAudio } from '../hooks/useAudio';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface BaccaratPageProps {
   onBackToHome: () => void;
@@ -46,6 +47,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
 
   // Game Play States
   const [balance, setBalance] = useState<number>(1250);
+  const [displayedBalance, setDisplayedBalance] = useState<number>(1250);
   const [betAmounts, setBetAmounts] = useState<{ player: number; tie: number; banker: number }>({
     player: 0,
     tie: 0,
@@ -58,9 +60,19 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
   });
   const [selectedChip, setSelectedChip] = useState<number>(10);
   const [activeTab, setActiveTab] = useState<'Roadmap' | 'History' | 'Chat'>('Roadmap');
-  const [selectedBet, setSelectedBet] = useState<'player' | 'tie' | 'banker' | null>('player');
-  const [gameState, setGameState] = useState<'betting' | 'dealing' | 'result'>('betting');
+  // selectedBet reserved for future UX highlight (e.g. last placed bet zone)
   
+  // Worker Sync States
+  const [serverPhase, setServerPhase] = useState<string>('BETTING_OPEN');
+  const [countdown, setCountdown] = useState<number>(15);
+  const [tableId, setTableId] = useState<string>('BETLOG-BACCARAT-1');
+  const [roundId, setRoundId] = useState<number>(0);
+  const [gameState, setGameState] = useState<'betting' | 'dealing' | 'result'>('betting');
+
+  // Ref trackers for phase & round changes
+  const prevPhaseRef = useRef<string>('');
+  const prevRoundRef = useRef<number>(-1);
+
   // Card States
   interface Card {
     value: string;
@@ -68,29 +80,24 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
     score: number;
     color: string;
   }
-  const [playerCards, setPlayerCards] = useState<Card[]>([
-    { value: '3', suit: '♣', score: 3, color: 'text-black' },
-    { value: '4', suit: '♦', score: 4, color: 'text-[#dc2626]' },
-  ]);
-  const [bankerCards, setBankerCards] = useState<Card[]>([
-    { value: '2', suit: '♠', score: 2, color: 'text-black' },
-    { value: '4', suit: '♥', score: 4, color: 'text-[#dc2626]' },
-  ]);
+  
+  interface AnimatedCard extends Card {
+    isDealt: boolean;
+    isFlipped: boolean;
+  }
+
+  const [playerCards, setPlayerCards] = useState<AnimatedCard[]>([]);
+  const [bankerCards, setBankerCards] = useState<AnimatedCard[]>([]);
+  
+  // Local result animations
+  const [localWinner, setLocalWinner] = useState<string | null>(null);
+  const [showResultBanner, setShowResultBanner] = useState<boolean>(false);
+  const [winPayoutPulse, setWinPayoutPulse] = useState<boolean>(false);
+  const [winArea, setWinArea] = useState<'player' | 'banker' | 'tie' | null>(null);
+  const [lastTickPlayed, setLastTickPlayed] = useState<number>(0);
   
   // Game log/Roadmap states
-  const [roadmap, setRoadmap] = useState<Array<{ t: string; c: string }>>([
-    { t: 'P', c: 'bg-[#2563eb] text-white shadow-[0_0_8px_rgba(37,99,235,0.5)]' },
-    { t: 'P', c: 'bg-[#2563eb] text-white shadow-[0_0_8px_rgba(37,99,235,0.5)]' },
-    { t: 'B', c: 'bg-[#dc2626] text-white shadow-[0_0_8px_rgba(220,38,38,0.5)]' },
-    { t: 'P', c: 'bg-[#2563eb] text-white shadow-[0_0_8px_rgba(37,99,235,0.5)]' },
-    { t: 'B', c: 'bg-[#dc2626] text-white shadow-[0_0_8px_rgba(220,38,38,0.5)]' },
-    { t: 'P', c: 'bg-[#2563eb] text-white shadow-[0_0_8px_rgba(37,99,235,0.5)]' },
-    { t: 'B', c: 'bg-[#dc2626] text-white shadow-[0_0_8px_rgba(220,38,38,0.5)]' },
-    { t: 'B', c: 'bg-[#dc2626] text-white shadow-[0_0_8px_rgba(220,38,38,0.5)]' },
-    { t: 'P', c: 'bg-[#2563eb] text-white shadow-[0_0_8px_rgba(37,99,235,0.5)]' },
-    { t: 'T', c: 'bg-[#16a34a] text-white shadow-[0_0_8px_rgba(22,163,74,0.5)]' },
-  ]);
-  
+  const [roadmap, setRoadmap] = useState<Array<{ t: string; c: string }>>([]);
   const [stats, setStats] = useState({ player: 45, tie: 10, banker: 45, total: 120 });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' | null }>({ message: '', type: null });
 
@@ -111,9 +118,10 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
     { value: 1000, label: '1K', color: 'from-zinc-700 to-zinc-900', border: 'border-zinc-400' },
   ];
 
-  // Helper score calculator
-  const calculateScore = (cards: Card[]) => {
-    const total = cards.reduce((sum, card) => sum + card.score, 0);
+  // Helper score calculator (based on isFlipped property to satisfy visual score delay)
+  const calculateScore = (cards: AnimatedCard[]) => {
+    const visibleCards = cards.filter(c => c.isFlipped);
+    const total = visibleCards.reduce((sum, card) => sum + card.score, 0);
     return total % 10;
   };
 
@@ -124,9 +132,270 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
     }, 4500);
   };
 
+  // Mappings from worker payload
+  const mapCard = (workerCard: any): AnimatedCard => ({
+    value: workerCard.rank,
+    suit: workerCard.suit,
+    score: workerCard.value,
+    color: workerCard.color === 'red' ? 'text-[#dc2626]' : 'text-black',
+    isDealt: false,
+    isFlipped: false,
+  });
+
+  const mapRoadmap = (bead: any) => {
+    const w = bead.winner;
+    return {
+      t: w === 'PLAYER' ? 'P' : w === 'BANKER' ? 'B' : 'T',
+      c: w === 'PLAYER'
+        ? 'bg-[#2563eb] text-white shadow-[0_0_8px_rgba(37,99,235,0.5)]'
+        : w === 'BANKER'
+        ? 'bg-[#dc2626] text-white shadow-[0_0_8px_rgba(220,38,38,0.5)]'
+        : 'bg-[#16a34a] text-white shadow-[0_0_8px_rgba(22,163,74,0.5)]',
+    };
+  };
+
+  // Balance count-up animator hook
+  useEffect(() => {
+    if (displayedBalance === balance) return;
+    const diff = balance - displayedBalance;
+    const step = Math.ceil(diff / 15);
+    const timer = setTimeout(() => {
+      setDisplayedBalance(prev => {
+        const nextVal = prev + step;
+        if ((step > 0 && nextVal >= balance) || (step < 0 && nextVal <= balance)) {
+          return balance;
+        }
+        return nextVal;
+      });
+    }, 40);
+    return () => clearTimeout(timer);
+  }, [balance, displayedBalance]);
+
+  // Last 5 seconds tick hook
+  useEffect(() => {
+    if ((serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL') && countdown <= 5 && countdown > 0) {
+      if (countdown !== lastTickPlayed) {
+        playSfx('LAST_5_SECONDS');
+        setLastTickPlayed(countdown);
+      }
+    }
+  }, [countdown, serverPhase, lastTickPlayed, playSfx]);
+
+  // ── Sync to Live Worker API ───────────────────────────────────────────────
+  useEffect(() => {
+    let active = true;
+
+    const fetchLiveState = async () => {
+      try {
+        const response = await fetch('https://betlog-baccarat-worker.tekamuna.workers.dev/api/live');
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!active) return;
+
+        // 1. Sync round change -> Clear local bets & result animations
+        const isNewRound = prevRoundRef.current !== -1 && prevRoundRef.current !== data.round;
+        if (isNewRound) {
+          setBetAmounts({ player: 0, tie: 0, banker: 0 });
+          setPlacedBets({ player: 0, tie: 0, banker: 0 });
+          setLocalWinner(null);
+          setShowResultBanner(false);
+          setWinPayoutPulse(false);
+          setWinArea(null);
+        }
+        prevRoundRef.current = data.round;
+
+        // 2. Sync Basic Info
+        setTableId(data.tableId);
+        setRoundId(data.round);
+        setServerPhase(data.phase);
+        setCountdown(data.countdown || data.phaseSecondsRemaining);
+
+        // 3. Sync Roadmap
+        if (data.roadmap) {
+          setRoadmap(data.roadmap.map(mapRoadmap));
+          const total = data.roadmap.length;
+          if (total > 0) {
+            const pCount = data.roadmap.filter((b: any) => b.winner === 'PLAYER').length;
+            const bCount = data.roadmap.filter((b: any) => b.winner === 'BANKER').length;
+            const tCount = data.roadmap.filter((b: any) => b.winner === 'TIE').length;
+            setStats({
+              player: Math.round((pCount / total) * 100),
+              banker: Math.round((bCount / total) * 100),
+              tie: Math.round((tCount / total) * 100),
+              total,
+            });
+          }
+        }
+
+        // 4. Map server phase to local UI gameState
+        if (data.phase === 'BETTING_OPEN' || data.phase === 'LAST_CALL') {
+          setGameState('betting');
+        } else if (data.phase === 'BETTING_CLOSED' || data.phase === 'DEALING' || data.phase === 'REVEALING') {
+          setGameState('dealing');
+        } else if (data.phase === 'RESULT') {
+          setGameState('result');
+        }
+
+        // 5. Play Audio Announcements & Handle Win/Loss Payouts on transition
+        if (prevPhaseRef.current !== data.phase) {
+          const oldPhase = prevPhaseRef.current;
+          prevPhaseRef.current = data.phase;
+
+          if (data.phase === 'BETTING_OPEN') {
+            playSfx('BET_OPEN');
+            playVoice('BETTING_OPEN');
+            setPlayerCards([]);
+            setBankerCards([]);
+          } else if (data.phase === 'LAST_CALL') {
+            playVoice('LAST_CALL');
+          } else if (data.phase === 'BETTING_CLOSED') {
+            playSfx('BET_CLOSED');
+            playVoice('BETTING_CLOSED');
+          } else if (data.phase === 'DEALING') {
+            // Start local staggered deal animation
+            const pMapped = data.playerCards.map(mapCard);
+            const bMapped = data.bankerCards.map(mapCard);
+            setPlayerCards(pMapped);
+            setBankerCards(bMapped);
+
+            // Stagger deals and play sfx
+            pMapped.forEach((c: any, idx: number) => {
+              setTimeout(() => {
+                playSfx('CARD_DEAL');
+                setPlayerCards(curr => {
+                  const copy = [...curr];
+                  if (copy[idx]) copy[idx] = { ...copy[idx]!, isDealt: true };
+                  return copy;
+                });
+              }, idx * 600);
+            });
+
+            bMapped.forEach((c: any, idx: number) => {
+              setTimeout(() => {
+                playSfx('CARD_DEAL');
+                setBankerCards(curr => {
+                  const copy = [...curr];
+                  if (copy[idx]) copy[idx] = { ...copy[idx]!, isDealt: true };
+                  return copy;
+                });
+              }, idx * 600 + 300);
+            });
+
+          } else if (data.phase === 'REVEALING') {
+            // Flip cards one by one
+            const pMapped = data.playerCards.map(mapCard);
+            const bMapped = data.bankerCards.map(mapCard);
+            // Ensure all are marked dealt
+            pMapped.forEach((c: any) => c.isDealt = true);
+            bMapped.forEach((c: any) => c.isDealt = true);
+            setPlayerCards(pMapped);
+            setBankerCards(bMapped);
+
+            // Stagger flips
+            pMapped.forEach((c: any, idx: number) => {
+              setTimeout(() => {
+                playSfx('CARD_FLIP');
+                setPlayerCards(curr => {
+                  const copy = [...curr];
+                  if (copy[idx]) copy[idx] = { ...copy[idx]!, isFlipped: true };
+                  return copy;
+                });
+              }, idx * 600);
+            });
+
+            bMapped.forEach((c: any, idx: number) => {
+              setTimeout(() => {
+                playSfx('CARD_FLIP');
+                setBankerCards(curr => {
+                  const copy = [...curr];
+                  if (copy[idx]) copy[idx] = { ...copy[idx]!, isFlipped: true };
+                  return copy;
+                });
+              }, idx * 600 + 300);
+            });
+
+          } else if (data.phase === 'RESULT') {
+            const resultObj = data.result;
+            // Force-load all cards as dealt & flipped for result accuracy
+            const pMapped = data.playerCards.map(mapCard);
+            const bMapped = data.bankerCards.map(mapCard);
+            pMapped.forEach((c: any) => { c.isDealt = true; c.isFlipped = true; });
+            bMapped.forEach((c: any) => { c.isDealt = true; c.isFlipped = true; });
+            setPlayerCards(pMapped);
+            setBankerCards(bMapped);
+
+            if (resultObj) {
+              setLocalWinner(resultObj.winner);
+              setShowResultBanner(true);
+              setWinArea(resultObj.winner.toLowerCase() as any);
+
+              if (resultObj.isNatural) {
+                playVoice(resultObj.naturalValue === 9 ? 'RESULT_NATURAL_NINE' : 'RESULT_NATURAL_EIGHT');
+              } else {
+                playVoice(resultObj.winner === 'PLAYER' ? 'RESULT_PLAYER' : resultObj.winner === 'BANKER' ? 'RESULT_BANKER' : 'RESULT_TIE');
+              }
+
+              // Evaluate payouts
+              const winner = resultObj.winner;
+              let winnings = 0;
+              setPlacedBets(currPlaced => {
+                if (winner === 'PLAYER' && currPlaced.player > 0) winnings += currPlaced.player * 2;
+                // Banker pays 0.95:1 (standard 5% commission)
+                if (winner === 'BANKER' && currPlaced.banker > 0) winnings += Math.floor(currPlaced.banker * 1.95);
+                // Tie pays 9:1
+                if (winner === 'TIE' && currPlaced.tie > 0) winnings += currPlaced.tie * 9;
+
+                if (winnings > 0) {
+                  setBalance(prev => prev + winnings);
+                  setWinPayoutPulse(true);
+                  showToast(`Congratulations! You won ₱${winnings.toLocaleString()} CR! (${winner} WINS)`, 'success');
+                } else if (currPlaced.player + currPlaced.banker + currPlaced.tie > 0) {
+                  showToast(`No matches! Try again! (${winner} WINS)`, 'error');
+                }
+                return currPlaced;
+              });
+            }
+          }
+        } else {
+          // Keep local cards inline with backend if phase hasn't changed (passive updates)
+          if (data.phase === 'DEALING' && playerCards.length === 0) {
+            const pMapped = data.playerCards.map(mapCard);
+            const bMapped = data.bankerCards.map(mapCard);
+            pMapped.forEach((c: any) => c.isDealt = true);
+            bMapped.forEach((c: any) => c.isDealt = true);
+            setPlayerCards(pMapped);
+            setBankerCards(bMapped);
+          } else if ((data.phase === 'REVEALING' || data.phase === 'RESULT') && (playerCards.length === 0 || !playerCards[0]?.isFlipped)) {
+            const pMapped = data.playerCards.map(mapCard);
+            const bMapped = data.bankerCards.map(mapCard);
+            pMapped.forEach((c: any) => { c.isDealt = true; c.isFlipped = true; });
+            bMapped.forEach((c: any) => { c.isDealt = true; c.isFlipped = true; });
+            setPlayerCards(pMapped);
+            setBankerCards(bMapped);
+            if (data.phase === 'RESULT' && data.result) {
+              setLocalWinner(data.result.winner);
+              setShowResultBanner(true);
+              setWinArea(data.result.winner.toLowerCase() as any);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to sync live state:', err);
+      }
+    };
+
+    fetchLiveState();
+    const interval = setInterval(fetchLiveState, 1000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [playVoice, playSfx, playerCards.length]);
+
+
   const handlePlaceBet = (spot: 'player' | 'tie' | 'banker') => {
-    if (gameState !== 'betting') {
-      showToast('Wait for the next betting round to start!', 'error');
+    if (serverPhase !== 'BETTING_OPEN' && serverPhase !== 'LAST_CALL') {
+      showToast('Betting is closed for this round!', 'error');
       return;
     }
     if (balance < selectedChip) {
@@ -142,7 +411,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
   };
 
   const handleClearBets = () => {
-    if (gameState !== 'betting') return;
+    if (serverPhase !== 'BETTING_OPEN' && serverPhase !== 'LAST_CALL') return;
     const totalReturned = betAmounts.player + betAmounts.tie + betAmounts.banker;
     if (totalReturned > 0) playSfx('CHIP_STACK');
     setBalance(prev => prev + totalReturned);
@@ -151,215 +420,17 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
   };
 
   const handleConfirmBets = () => {
-    if (gameState !== 'betting') return;
+    if (serverPhase !== 'BETTING_OPEN' && serverPhase !== 'LAST_CALL') {
+      showToast('Betting is closed for this round!', 'error');
+      return;
+    }
     const totalBet = betAmounts.player + betAmounts.tie + betAmounts.banker;
     if (totalBet === 0) {
       showToast('Please place at least one bet!', 'info');
       return;
     }
     setPlacedBets({ ...betAmounts });
-    showToast('Bets confirmed! Dealing cards...', 'success');
-    // ── Audio: bets closed ──
-    playSfx('BET_CLOSED');
-    playVoice('BETTING_CLOSED');
-    setGameState('dealing');
-
-    // Deal cards after voice finishes (~1.5 s)
-    setTimeout(() => {
-      simulateDeal();
-    }, 1500);
-  };
-
-  const simulateDeal = () => {
-    const suits = [
-      { s: '♣', c: 'text-black' },
-      { s: '♦', c: 'text-[#dc2626]' },
-      { s: '♠', c: 'text-black' },
-      { s: '♥', c: 'text-[#dc2626]' },
-    ];
-    const cardValues = [
-      { v: 'A', s: 1 },
-      { v: '2', s: 2 },
-      { v: '3', s: 3 },
-      { v: '4', s: 4 },
-      { v: '5', s: 5 },
-      { v: '6', s: 6 },
-      { v: '7', s: 7 },
-      { v: '8', s: 8 },
-      { v: '9', s: 9 },
-      { v: '10', s: 0 },
-      { v: 'J', s: 0 },
-      { v: 'Q', s: 0 },
-      { v: 'K', s: 0 },
-    ];
-
-    const drawCard = () => {
-      const valObj = cardValues[Math.floor(Math.random() * cardValues.length)];
-      const suitObj = suits[Math.floor(Math.random() * suits.length)];
-      return {
-        value: valObj.v,
-        suit: suitObj.s,
-        score: valObj.s,
-        color: suitObj.c,
-      };
-    };
-
-    // Deal initial cards
-    const p1 = drawCard();
-    const p2 = drawCard();
-    const b1 = drawCard();
-    const b2 = drawCard();
-
-    let currentP = [p1, p2];
-    let currentB = [b1, b2];
-
-    // ── Audio: card deal SFX for initial 4 cards ──
-    playSfx('CARD_DEAL');
-    setTimeout(() => playSfx('CARD_DEAL'), 200);
-    setTimeout(() => playSfx('CARD_DEAL'), 400);
-    setTimeout(() => playSfx('CARD_DEAL'), 600);
-
-    setPlayerCards(currentP);
-    setBankerCards(currentB);
-
-    let pScore = (p1.score + p2.score) % 10;
-    let bScore = (b1.score + b2.score) % 10;
-
-    // Standard Baccarat Third Card Rule logic
-    let extraDealTime = 0;
-
-    // Detect naturals (8 or 9) early for voice
-    const isNatural = pScore >= 8 || bScore >= 8;
-
-    // If neither has 8 or 9 (Natural win)
-    if (pScore < 8 && bScore < 8) {
-      // Player draws if score is 0-5
-      let pDraw = false;
-      let pThirdCard: Card | null = null;
-      if (pScore <= 5) {
-        pDraw = true;
-        pThirdCard = drawCard();
-        currentP.push(pThirdCard);
-        pScore = (pScore + pThirdCard.score) % 10;
-        extraDealTime = 1000;
-        setTimeout(() => {
-          playSfx('CARD_FLIP');
-          setPlayerCards([...currentP]);
-        }, 800);
-      }
-
-      // Banker draws rules
-      let bDraw = false;
-      if (pDraw && pThirdCard) {
-        const val = pThirdCard.score;
-        if (bScore <= 2) bDraw = true;
-        else if (bScore === 3 && val !== 8) bDraw = true;
-        else if (bScore === 4 && [2, 3, 4, 5, 6, 7].includes(val)) bDraw = true;
-        else if (bScore === 5 && [4, 5, 6, 7].includes(val)) bDraw = true;
-        else if (bScore === 6 && [6, 7].includes(val)) bDraw = true;
-      } else if (!pDraw) {
-        if (bScore <= 5) bDraw = true;
-      }
-
-      if (bDraw) {
-        const bThird = drawCard();
-        currentB.push(bThird);
-        bScore = (bScore + bThird.score) % 10;
-        extraDealTime = 1800;
-        setTimeout(() => {
-          playSfx('CARD_FLIP');
-          setBankerCards([...currentB]);
-        }, 1500);
-      }
-    }
-
-    // Resolve outcome
-    setTimeout(() => {
-      let result: 'player' | 'tie' | 'banker';
-      let resultLabel = '';
-      if (pScore > bScore) {
-        result = 'player';
-        resultLabel = 'PLAYER WINS';
-      } else if (bScore > pScore) {
-        result = 'banker';
-        resultLabel = 'BANKER WINS';
-      } else {
-        result = 'tie';
-        resultLabel = 'TIE GAME';
-      }
-
-      // Calculate Winnings
-      let totalPayout = 0;
-      if (result === 'player' && placedBets.player > 0) {
-        totalPayout += placedBets.player * 2;
-      }
-      if (result === 'banker' && placedBets.banker > 0) {
-        totalPayout += placedBets.banker * 2;
-      }
-      if (result === 'tie' && placedBets.tie > 0) {
-        totalPayout += placedBets.tie * 9;
-      }
-
-      // ── Audio: result voice line ──
-      if (isNatural) {
-        // Natural eight or nine — use the correct voice
-        const naturalScore = Math.max(pScore, bScore);
-        playVoice(naturalScore >= 9 ? 'RESULT_NATURAL_NINE' : 'RESULT_NATURAL_EIGHT');
-      } else if (result === 'player') {
-        playVoice('RESULT_PLAYER');
-      } else if (result === 'banker') {
-        playVoice('RESULT_BANKER');
-      } else {
-        playVoice('RESULT_TIE');
-      }
-
-      if (totalPayout > 0) {
-        setBalance(prev => prev + totalPayout);
-        showToast(`Congratulations! You won ₱${totalPayout} CR! (${resultLabel})`, 'success');
-      } else if (placedBets.player + placedBets.tie + placedBets.banker > 0) {
-        showToast(`No matches! Try again! (${resultLabel})`, 'error');
-      } else {
-        showToast(`Round finished: ${resultLabel}`, 'info');
-      }
-
-      // Add to Roadmap
-      const roadmapItem = {
-        t: result === 'player' ? 'P' : result === 'banker' ? 'B' : 'T',
-        c: result === 'player'
-          ? 'bg-[#2563eb] text-white shadow-[0_0_8px_rgba(37,99,235,0.5)]'
-          : result === 'banker'
-          ? 'bg-[#dc2626] text-white shadow-[0_0_8px_rgba(220,38,38,0.5)]'
-          : 'bg-[#16a34a] text-white shadow-[0_0_8px_rgba(22,163,74,0.5)]',
-      };
-      setRoadmap(prev => [...prev.slice(1), roadmapItem]);
-
-      // Update statistics
-      setStats(prev => {
-        const total = prev.total + 1;
-        const isPlayer = result === 'player';
-        const isBanker = result === 'banker';
-        const isTie = result === 'tie';
-        return {
-          player: Math.round(((prev.player * prev.total + (isPlayer ? 100 : 0)) / total)),
-          banker: Math.round(((prev.banker * prev.total + (isBanker ? 100 : 0)) / total)),
-          tie: Math.round(((prev.tie * prev.total + (isTie ? 100 : 0)) / total)),
-          total,
-        };
-      });
-
-      setGameState('result');
-
-      // Reset back to betting phase after 4 seconds
-      setTimeout(() => {
-        setGameState('betting');
-        setBetAmounts({ player: 0, tie: 0, banker: 0 });
-        setPlacedBets({ player: 0, tie: 0, banker: 0 });
-        // ── Audio: next round opens ──
-        playSfx('BET_OPEN');
-        playVoice('BETTING_OPEN');
-      }, 4000);
-
-    }, 1500 + extraDealTime);
+    showToast('Bets confirmed! Waiting for dealer...', 'success');
   };
 
   const handleSendMessage = (e?: React.FormEvent) => {
@@ -443,7 +514,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
           {/* Balance Pill */}
           <div className="bg-[#0f0e0a]/80 border border-amber-500/20 rounded-lg pl-3 pr-1 py-1 flex items-center gap-3">
             <span className="text-amber-400 font-extrabold text-sm tracking-wide">
-              ₱{balance.toLocaleString()} CR
+              ₱{displayedBalance.toLocaleString()} CR
             </span>
             <button onClick={() => setBalance(prev => prev + 500)} className="bg-amber-400 hover:bg-amber-500 text-black w-6 h-6 rounded flex items-center justify-center font-bold transition-all cursor-pointer">
               <Plus className="w-4 h-4 stroke-[3]" />
@@ -498,22 +569,67 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
             {/* Vignette Gradient Overlay */}
             <div className="absolute inset-0 bg-gradient-to-t from-[#07090e] via-transparent to-black/40" />
 
-            {/* Top Left: LIVE Badge */}
-            <div className="absolute top-3 left-3 md:top-4 md:left-4 z-10 flex items-center gap-2">
-              <span className="bg-[#e50914] text-white text-[10px] md:text-[11px] font-black px-2 md:px-2.5 py-0.5 rounded tracking-wider uppercase shadow-md animate-pulse">
-                {gameState === 'betting' ? 'PLACE BETS' : gameState === 'dealing' ? 'DEALING...' : 'RESULTS'}
-              </span>
+            {/* Top Left: LIVE Badge & Table Stats */}
+            <div className="absolute top-3 left-3 md:top-4 md:left-4 z-10 flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <span className="bg-[#e50914] text-white text-[10px] md:text-[11px] font-black px-2 md:px-2.5 py-0.5 rounded tracking-wider uppercase shadow-md animate-pulse">
+                  {serverPhase === 'BETTING_OPEN' ? 'PLACE BETS' : serverPhase === 'LAST_CALL' ? 'LAST CALL!' : serverPhase === 'BETTING_CLOSED' ? 'NO MORE BETS' : serverPhase === 'DEALING' ? 'DEALING...' : serverPhase === 'REVEALING' ? 'REVEALING...' : 'RESULTS'}
+                </span>
+                <span className="text-[10px] text-zinc-400 font-bold bg-black/60 px-2 py-0.5 rounded border border-white/5">
+                  Round #{roundId}
+                </span>
+              </div>
             </div>
+
+            {/* Center Screen: Circular Glassmorphic Countdown Overlay */}
+            {(serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL') && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/30 backdrop-blur-[1px] z-10 animate-in fade-in duration-300">
+                <div className={`w-28 h-28 rounded-full border-4 flex flex-col items-center justify-center backdrop-blur-md shadow-2xl transition-all duration-300 ${
+                  serverPhase === 'LAST_CALL' 
+                    ? 'border-red-500 bg-red-950/20 text-red-500 scale-105 animate-pulse' 
+                    : 'border-amber-400 bg-black/40 text-amber-400'
+                }`}>
+                  <span className="text-4xl font-extrabold tracking-tighter leading-none select-none">
+                    {countdown}
+                  </span>
+                  <span className="text-[9px] uppercase font-black tracking-widest mt-1 opacity-85">
+                    {serverPhase === 'LAST_CALL' ? 'LAST CALL' : 'SECONDS'}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Top Right: Table Info Overlay */}
             <div className="absolute top-3 right-3 md:top-4 md:right-4 z-10 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-2 md:px-2.5 py-1 flex items-center gap-2 text-[10px] md:text-[11px] text-zinc-300">
               <div className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                <span className="font-semibold">1,248</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                <span className="w-2 h-2 rounded-full bg-emerald-500 absolute" />
+                <span className="font-semibold ml-2">1,248</span>
               </div>
               <span className="text-zinc-500">|</span>
-              <span className="text-zinc-400">Table Info</span>
+              <span className="text-zinc-400">{tableId}</span>
             </div>
+
+            {/* Center Screen Result Banner Overlay */}
+            <AnimatePresence>
+              {showResultBanner && localWinner && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="absolute inset-x-0 top-1/3 flex justify-center z-35"
+                >
+                  <div className="bg-black/80 backdrop-blur-md border border-[#F5BA15]/30 px-8 py-3 rounded-2xl shadow-[0_0_40px_rgba(245,186,21,0.25)] flex flex-col items-center justify-center">
+                    <span className="text-[10px] uppercase font-black tracking-widest text-[#F5BA15] mb-1">
+                      ROUND COMPLETE
+                    </span>
+                    <span className="text-xl md:text-2xl font-black tracking-wider text-white">
+                      {localWinner === 'PLAYER' ? 'PLAYER WINS' : localWinner === 'BANKER' ? 'BANKER WINS' : 'TIE GAME'}
+                    </span>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Bottom Live Game Felt Display: PLAYER and BANKER cards & scores */}
             <div className="absolute bottom-3 md:bottom-4 left-0 right-0 px-4 md:px-6 flex items-end justify-between max-w-2xl mx-auto z-10">
@@ -523,18 +639,47 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
                   PLAYER
                 </span>
                 <div className="flex items-center gap-1.5 md:gap-2.5">
-                  {/* Score Badge */}
-                  <div className="w-6 h-6 md:w-7 md:h-7 rounded-full bg-[#1e3a8a] border border-[#60a5fa] text-white font-black text-[11px] md:text-xs flex items-center justify-center shadow-lg">
-                    {calculateScore(playerCards)}
-                  </div>
-
-                  {playerCards.map((card, index) => (
-                    <div key={index} className="w-8 h-12 md:w-10 md:h-14 bg-white rounded shadow-xl border border-zinc-300 flex flex-col justify-between p-1 select-none animate-in fade-in zoom-in duration-300">
-                      <div className="text-[10px] md:text-[11px] font-bold leading-none text-black">{card.value}</div>
-                      <div className={`text-xs md:text-sm self-center leading-none ${card.color}`}>{card.suit}</div>
-                      <div className="text-[10px] md:text-[11px] font-bold leading-none self-end rotate-180 text-black">{card.value}</div>
+                  {/* Score Badge (Only visible when at least one card is flipped) */}
+                  {playerCards.some(c => c.isFlipped) && (
+                    <div className="w-6 h-6 md:w-7 md:h-7 rounded-full bg-[#1e3a8a] border border-[#60a5fa] text-white font-black text-[11px] md:text-xs flex items-center justify-center shadow-lg">
+                      {calculateScore(playerCards)}
                     </div>
-                  ))}
+                  )}
+
+                  <AnimatePresence>
+                    {playerCards.map((card, index) => {
+                      if (!card.isDealt) return null;
+                      return (
+                        <motion.div
+                          key={`p-card-${index}`}
+                          initial={{ x: 200, y: -250, rotate: 45, scale: 0.2, opacity: 0 }}
+                          animate={{ x: 0, y: 0, rotate: 0, scale: 1, opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ type: "spring", stiffness: 120, damping: 14 }}
+                          className="w-8 h-12 md:w-10 md:h-14 perspective relative"
+                        >
+                          <motion.div
+                            animate={{ rotateY: card.isFlipped ? 180 : 0 }}
+                            transition={{ duration: 0.4, ease: "easeInOut" }}
+                            className="w-full h-full preserve-3d relative"
+                          >
+                            {/* Card Back */}
+                            <div className="absolute inset-0 bg-gradient-to-br from-blue-800 to-blue-950 rounded border-2 border-white/90 shadow-xl flex items-center justify-center backface-hidden">
+                              <div className="w-full h-full border border-blue-600/30 rounded flex items-center justify-center">
+                                <span className="text-white/20 text-[8px] font-black tracking-widest rotate-45">BETLOG</span>
+                              </div>
+                            </div>
+                            {/* Card Front */}
+                            <div className="absolute inset-0 bg-white rounded border border-zinc-300 shadow-xl flex flex-col justify-between p-1 select-none rotate-y-180 backface-hidden">
+                              <div className="text-[10px] md:text-[11px] font-bold leading-none text-black">{card.value}</div>
+                              <div className={`text-xs md:text-sm self-center leading-none ${card.color}`}>{card.suit}</div>
+                              <div className="text-[10px] md:text-[11px] font-bold leading-none self-end rotate-180 text-black">{card.value}</div>
+                            </div>
+                          </motion.div>
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
                 </div>
               </div>
 
@@ -544,18 +689,47 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
                   BANKER
                 </span>
                 <div className="flex items-center gap-1.5 md:gap-2.5">
-                  {bankerCards.map((card, index) => (
-                    <div key={index} className="w-8 h-12 md:w-10 md:h-14 bg-white rounded shadow-xl border border-zinc-300 flex flex-col justify-between p-1 select-none animate-in fade-in zoom-in duration-300">
-                      <div className="text-[10px] md:text-[11px] font-bold leading-none text-black">{card.value}</div>
-                      <div className={`text-xs md:text-sm self-center leading-none ${card.color}`}>{card.suit}</div>
-                      <div className="text-[10px] md:text-[11px] font-bold leading-none self-end rotate-180 text-black">{card.value}</div>
-                    </div>
-                  ))}
+                  <AnimatePresence>
+                    {bankerCards.map((card, index) => {
+                      if (!card.isDealt) return null;
+                      return (
+                        <motion.div
+                          key={`b-card-${index}`}
+                          initial={{ x: 100, y: -250, rotate: 45, scale: 0.2, opacity: 0 }}
+                          animate={{ x: 0, y: 0, rotate: 0, scale: 1, opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ type: "spring", stiffness: 120, damping: 14 }}
+                          className="w-8 h-12 md:w-10 md:h-14 perspective relative"
+                        >
+                          <motion.div
+                            animate={{ rotateY: card.isFlipped ? 180 : 0 }}
+                            transition={{ duration: 0.4, ease: "easeInOut" }}
+                            className="w-full h-full preserve-3d relative"
+                          >
+                            {/* Card Back */}
+                            <div className="absolute inset-0 bg-gradient-to-br from-red-800 to-red-950 rounded border-2 border-white/90 shadow-xl flex items-center justify-center backface-hidden">
+                              <div className="w-full h-full border border-red-600/30 rounded flex items-center justify-center">
+                                <span className="text-white/20 text-[8px] font-black tracking-widest rotate-45">BETLOG</span>
+                              </div>
+                            </div>
+                            {/* Card Front */}
+                            <div className="absolute inset-0 bg-white rounded border border-zinc-300 shadow-xl flex flex-col justify-between p-1 select-none rotate-y-180 backface-hidden">
+                              <div className="text-[10px] md:text-[11px] font-bold leading-none text-black">{card.value}</div>
+                              <div className={`text-xs md:text-sm self-center leading-none ${card.color}`}>{card.suit}</div>
+                              <div className="text-[10px] md:text-[11px] font-bold leading-none self-end rotate-180 text-black">{card.value}</div>
+                            </div>
+                          </motion.div>
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
 
-                  {/* Score Badge */}
-                  <div className="w-6 h-6 md:w-7 md:h-7 rounded-full bg-[#7f1d1d] border border-[#f87171] text-white font-black text-[11px] md:text-xs flex items-center justify-center shadow-lg">
-                    {calculateScore(bankerCards)}
-                  </div>
+                  {/* Score Badge (Only visible when at least one card is flipped) */}
+                  {bankerCards.some(c => c.isFlipped) && (
+                    <div className="w-6 h-6 md:w-7 md:h-7 rounded-full bg-[#7f1d1d] border border-[#f87171] text-white font-black text-[11px] md:text-xs flex items-center justify-center shadow-lg">
+                      {calculateScore(bankerCards)}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -567,9 +741,13 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
             <button
               onClick={() => handlePlaceBet('player')}
               className={`h-20 sm:h-24 md:h-28 rounded-xl md:rounded-2xl flex flex-col items-center justify-center border transition-all cursor-pointer ${
-                betAmounts.player > 0
+                winArea === 'player' && winPayoutPulse
+                  ? 'winning-glow-pulse bg-[#0a1628] border-amber-400'
+                  : betAmounts.player > 0
                   ? 'bg-[#0a1628] border-[#38bdf8] shadow-[0_0_15px_rgba(56,189,248,0.25)]'
-                  : 'bg-[#080d18] border-[#1a2336] hover:border-[#38bdf8]/50'
+                  : (serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL')
+                  ? 'bg-[#080d18] border-[#1a2336]/60 hover:border-[#38bdf8]/50 shadow-[0_0_8px_rgba(56,189,248,0.05)]'
+                  : 'bg-[#080d18] border-zinc-900 opacity-60 cursor-not-allowed'
               }`}
             >
               <span className="text-[#38bdf8] font-black text-sm sm:text-base md:text-lg tracking-wider uppercase">
@@ -578,6 +756,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
               <span className="text-zinc-400 font-semibold text-xs md:text-sm mt-0.5">
                 1:1
               </span>
+              <span className="text-zinc-600 text-[9px] mt-0.5">even money</span>
               {betAmounts.player > 0 && (
                 <div className="mt-1 bg-[#2563eb] text-white font-black text-[10px] px-2 py-0.5 rounded-full">
                   ₱{betAmounts.player}
@@ -589,16 +768,20 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
             <button
               onClick={() => handlePlaceBet('tie')}
               className={`h-20 sm:h-24 md:h-28 rounded-xl md:rounded-2xl flex flex-col items-center justify-center border transition-all cursor-pointer ${
-                betAmounts.tie > 0
+                winArea === 'tie' && winPayoutPulse
+                  ? 'winning-glow-pulse bg-[#081b12] border-amber-400'
+                  : betAmounts.tie > 0
                   ? 'bg-[#081b12] border-[#22c55e] shadow-[0_0_15px_rgba(34,197,94,0.25)]'
-                  : 'bg-[#07130e] border-[#152a1e] hover:border-[#22c55e]/50'
+                  : (serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL')
+                  ? 'bg-[#07130e] border-[#152a1e]/60 hover:border-[#22c55e]/50 shadow-[0_0_8px_rgba(34,197,94,0.05)]'
+                  : 'bg-[#07130e] border-zinc-900 opacity-60 cursor-not-allowed'
               }`}
             >
               <span className="text-[#22c55e] font-black text-sm sm:text-base md:text-lg tracking-wider uppercase">
                 TIE
               </span>
               <span className="text-zinc-400 font-semibold text-xs md:text-sm mt-0.5">
-                8:1
+                9:1
               </span>
               {betAmounts.tie > 0 && (
                 <div className="mt-1 bg-[#16a34a] text-white font-black text-[10px] px-2 py-0.5 rounded-full">
@@ -611,17 +794,22 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
             <button
               onClick={() => handlePlaceBet('banker')}
               className={`h-20 sm:h-24 md:h-28 rounded-xl md:rounded-2xl flex flex-col items-center justify-center border transition-all cursor-pointer ${
-                betAmounts.banker > 0
+                winArea === 'banker' && winPayoutPulse
+                  ? 'winning-glow-pulse bg-[#220c0e] border-amber-400'
+                  : betAmounts.banker > 0
                   ? 'bg-[#220c0e] border-[#ef4444] shadow-[0_0_15px_rgba(239,68,68,0.25)]'
-                  : 'bg-[#18090b] border-[#331418] hover:border-[#ef4444]/50'
+                  : (serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL')
+                  ? 'bg-[#18090b] border-[#331418]/60 hover:border-[#ef4444]/50 shadow-[0_0_8px_rgba(239,68,68,0.05)]'
+                  : 'bg-[#18090b] border-zinc-900 opacity-60 cursor-not-allowed'
               }`}
             >
               <span className="text-[#ef4444] font-black text-sm sm:text-base md:text-lg tracking-wider uppercase">
                 BANKER
               </span>
               <span className="text-zinc-400 font-semibold text-xs md:text-sm mt-0.5">
-                1:1
+                0.95:1
               </span>
+              <span className="text-zinc-600 text-[9px] mt-0.5">5% commission</span>
               {betAmounts.banker > 0 && (
                 <div className="mt-1 bg-[#dc2626] text-white font-black text-[10px] px-2 py-0.5 rounded-full">
                   ₱{betAmounts.banker}
@@ -629,6 +817,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
               )}
             </button>
           </div>
+
 
           {/* Chips Tray & Action Buttons */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 md:gap-3 mt-1">

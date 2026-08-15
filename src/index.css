@@ -6,3 +6,34 @@
   }
 }
 
+/* 3D Card Flip Utilities */
+.perspective {
+  perspective: 1000px;
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(245, 186, 21, 0.2);
+    border-color: rgba(245, 186, 21, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(245, 186, 21, 0.6);
+    border-color: rgba(245, 186, 21, 1);
+  }
+}
+
+.winning-glow-pulse {
+  animation: pulseGlow 1.5s infinite ease-in-out;
+}
