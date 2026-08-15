@@ -37,3 +37,41 @@
 .winning-glow-pulse {
   animation: pulseGlow 1.5s infinite ease-in-out;
 }
+
+@keyframes betShimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+.bet-zone-shimmer {
+  background-size: 200% auto;
+  animation: betShimmer 2s linear infinite;
+}
+
+.chip-lift {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.chip-lift:hover {
+  transform: translateY(-4px) scale(1.08);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+}
+
+/* Authentic Poker Chip Styling with outer striped edge design */
+.poker-chip-stripes {
+  background-image: repeating-conic-gradient(
+    from 0deg,
+    rgba(255,255,255,0.85) 0deg 15deg,
+    transparent 15deg 45deg
+  );
+}
+
+.drag-over-active {
+  box-shadow: inset 0 0 25px rgba(245, 186, 21, 0.4), 0 0 15px rgba(245, 186, 21, 0.25);
+  border-color: #F5BA15 !important;
+}
+
+
+
+
+
+

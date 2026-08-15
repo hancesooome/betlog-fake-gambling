@@ -15,6 +15,7 @@ import {
   RotateCcw,
   Send,
   ArrowLeft,
+  X,
   Crown,
   Home,
   Gamepad2,
@@ -26,6 +27,19 @@ import { useDealerVoice } from '../hooks/useDealerVoice';
 import { useSoundEffects } from '../hooks/useSoundEffects';
 import { useAudio } from '../hooks/useAudio';
 import { motion, AnimatePresence } from 'framer-motion';
+import PokerChip from './PokerChip';
+import BetChipStack from './BetChipStack';
+
+// ─── Bet Key Types ────────────────────────────────────────────────────────────
+type MainBetKey = 'player' | 'tie' | 'banker';
+type SideBetKey = 'playerPair' | 'bankerPair' | 'perfectPair' | 'eitherPair' | 'playerBonus' | 'bankerBonus';
+type AllBetKey = MainBetKey | SideBetKey;
+
+const ZERO_BETS: Record<AllBetKey, number> = {
+  player: 0, tie: 0, banker: 0,
+  playerPair: 0, bankerPair: 0, perfectPair: 0, eitherPair: 0,
+  playerBonus: 0, bankerBonus: 0,
+};
 
 interface BaccaratPageProps {
   onBackToHome: () => void;
@@ -48,19 +62,11 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
   // Game Play States
   const [balance, setBalance] = useState<number>(1250);
   const [displayedBalance, setDisplayedBalance] = useState<number>(1250);
-  const [betAmounts, setBetAmounts] = useState<{ player: number; tie: number; banker: number }>({
-    player: 0,
-    tie: 0,
-    banker: 0,
-  });
-  const [placedBets, setPlacedBets] = useState<{ player: number; tie: number; banker: number }>({
-    player: 0,
-    tie: 0,
-    banker: 0,
-  });
+  const [betAmounts, setBetAmounts] = useState<Record<AllBetKey, number>>({ ...ZERO_BETS });
+  const [placedBets, setPlacedBets] = useState<Record<AllBetKey, number>>({ ...ZERO_BETS });
+  const [betHistory, setBetHistory] = useState<Array<{ spot: AllBetKey; amount: number }>>([]);
   const [selectedChip, setSelectedChip] = useState<number>(10);
   const [activeTab, setActiveTab] = useState<'Roadmap' | 'History' | 'Chat'>('Roadmap');
-  // selectedBet reserved for future UX highlight (e.g. last placed bet zone)
   
   // Worker Sync States
   const [serverPhase, setServerPhase] = useState<string>('BETTING_OPEN');
@@ -93,8 +99,11 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
   const [localWinner, setLocalWinner] = useState<string | null>(null);
   const [showResultBanner, setShowResultBanner] = useState<boolean>(false);
   const [winPayoutPulse, setWinPayoutPulse] = useState<boolean>(false);
-  const [winArea, setWinArea] = useState<'player' | 'banker' | 'tie' | null>(null);
+  const [winArea, setWinArea] = useState<MainBetKey | null>(null);
+  const [winSideBets, setWinSideBets] = useState<Set<SideBetKey>>(new Set());
   const [lastTickPlayed, setLastTickPlayed] = useState<number>(0);
+  // Stable ref so the tick effect doesn't re-fire when playSfx identity changes
+  const lastTickRef = useRef<number>(0);
   
   // Game log/Roadmap states
   const [roadmap, setRoadmap] = useState<Array<{ t: string; c: string }>>([]);
@@ -110,13 +119,30 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
   ]);
 
   const chips = [
-    { value: 10, label: '10', color: 'from-blue-500 to-blue-700', border: 'border-blue-300' },
-    { value: 25, label: '25', color: 'from-red-500 to-red-700', border: 'border-red-300' },
-    { value: 50, label: '50', color: 'from-purple-500 to-purple-800', border: 'border-purple-300' },
-    { value: 100, label: '100', color: 'from-emerald-500 to-emerald-700', border: 'border-emerald-300' },
-    { value: 300, label: '300', color: 'from-amber-500 to-amber-700', border: 'border-amber-300' },
-    { value: 1000, label: '1K', color: 'from-zinc-700 to-zinc-900', border: 'border-zinc-400' },
+    { value: 1,    label: '1'    },
+    { value: 2,    label: '2'    },
+    { value: 5,    label: '5'    },
+    { value: 25,   label: '25'   },
+    { value: 100,  label: '100'  },
+    { value: 500,  label: '500'  },
+    { value: 1000, label: '1000' },
   ];
+
+  // ── Responsive chip size (px) — 40 on mobile, 56 on desktop ───────────────
+  const [chipSize, setChipSize] = useState(() => window.innerWidth < 640 ? 40 : 56);
+  useEffect(() => {
+    const onResize = () => setChipSize(window.innerWidth < 640 ? 40 : 56);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // Betting panel grid template — narrower side columns on small screens
+  const betGridCols = chipSize < 56
+    ? '52px 1fr 72px 1fr 52px'
+    : '76px 1fr 96px 1fr 76px';
+
+  // ── Derived State ─────────────────────────────────────────────────────────
+  const isBettingOpen = serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL';
 
   // Helper score calculator (based on isFlipped property to satisfy visual score delay)
   const calculateScore = (cards: AnimatedCard[]) => {
@@ -171,15 +197,22 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
     return () => clearTimeout(timer);
   }, [balance, displayedBalance]);
 
-  // Last 5 seconds tick hook
+  // Stable ref to playSfx — prevents tick effect from re-running on every render
+  const playSfxRef = useRef(playSfx);
+  useEffect(() => { playSfxRef.current = playSfx; });
+
+  // Last 5 seconds tick — fires exactly once per unique countdown value
   useEffect(() => {
-    if ((serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL') && countdown <= 5 && countdown > 0) {
-      if (countdown !== lastTickPlayed) {
-        playSfx('LAST_5_SECONDS');
-        setLastTickPlayed(countdown);
-      }
+    if (
+      (serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL') &&
+      countdown <= 5 &&
+      countdown > 0 &&
+      countdown !== lastTickRef.current
+    ) {
+      lastTickRef.current = countdown;
+      playSfxRef.current('LAST_5_SECONDS');
     }
-  }, [countdown, serverPhase, lastTickPlayed, playSfx]);
+  }, [countdown, serverPhase]);
 
   // ── Sync to Live Worker API ───────────────────────────────────────────────
   useEffect(() => {
@@ -195,8 +228,10 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
         // 1. Sync round change -> Clear local bets & result animations
         const isNewRound = prevRoundRef.current !== -1 && prevRoundRef.current !== data.round;
         if (isNewRound) {
-          setBetAmounts({ player: 0, tie: 0, banker: 0 });
-          setPlacedBets({ player: 0, tie: 0, banker: 0 });
+          setBetAmounts({ ...ZERO_BETS });
+          setPlacedBets({ ...ZERO_BETS });
+          setBetHistory([]);
+          setWinSideBets(new Set());
           setLocalWinner(null);
           setShowResultBanner(false);
           setWinPayoutPulse(false);
@@ -338,19 +373,37 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
               // Evaluate payouts
               const winner = resultObj.winner;
               let winnings = 0;
-              setPlacedBets(currPlaced => {
-                if (winner === 'PLAYER' && currPlaced.player > 0) winnings += currPlaced.player * 2;
-                // Banker pays 0.95:1 (standard 5% commission)
-                if (winner === 'BANKER' && currPlaced.banker > 0) winnings += Math.floor(currPlaced.banker * 1.95);
-                // Tie pays 9:1
-                if (winner === 'TIE' && currPlaced.tie > 0) winnings += currPlaced.tie * 9;
+              // Detect pairs from raw server card data
+              const hasPP = data.playerCards.length >= 2 && data.playerCards[0].rank === data.playerCards[1].rank;
+              const hasBP = data.bankerCards.length >= 2 && data.bankerCards[0].rank === data.bankerCards[1].rank;
+              const hasPerfectPair = hasPP && data.playerCards[0].suit === data.playerCards[1].suit;
+              const hasEitherPair  = hasPP || hasBP;
+              // Track which side bets hit
+              const hitSideBets = new Set<SideBetKey>();
+              if (hasPP)          hitSideBets.add('playerPair');
+              if (hasBP)          hitSideBets.add('bankerPair');
+              if (hasPerfectPair) hitSideBets.add('perfectPair');
+              if (hasEitherPair)  hitSideBets.add('eitherPair');
+              setWinSideBets(hitSideBets);
 
+              setPlacedBets(currPlaced => {
+                // Main bets
+                if (winner === 'PLAYER' && currPlaced.player > 0) winnings += currPlaced.player * 2;
+                if (winner === 'BANKER' && currPlaced.banker > 0) winnings += Math.floor(currPlaced.banker * 1.95);
+                if (winner === 'TIE'    && currPlaced.tie > 0)    winnings += currPlaced.tie * 9;
+                // Side bets
+                if (hasPP          && currPlaced.playerPair  > 0) winnings += currPlaced.playerPair  * 12; // 11:1
+                if (hasBP          && currPlaced.bankerPair  > 0) winnings += currPlaced.bankerPair  * 12;
+                if (hasPerfectPair && currPlaced.perfectPair > 0) winnings += currPlaced.perfectPair * 26; // 25:1
+                if (hasEitherPair  && currPlaced.eitherPair  > 0) winnings += currPlaced.eitherPair  * 6;  // 5:1
+
+                const mainBetTotal = currPlaced.player + currPlaced.banker + currPlaced.tie;
                 if (winnings > 0) {
                   setBalance(prev => prev + winnings);
                   setWinPayoutPulse(true);
-                  showToast(`Congratulations! You won ₱${winnings.toLocaleString()} CR! (${winner} WINS)`, 'success');
-                } else if (currPlaced.player + currPlaced.banker + currPlaced.tie > 0) {
-                  showToast(`No matches! Try again! (${winner} WINS)`, 'error');
+                  showToast(`🎉 Won ₱${winnings.toLocaleString()} CR! (${winner} WINS)`, 'success');
+                } else if (mainBetTotal > 0) {
+                  showToast(`No match. ${winner} WINS — better luck next round!`, 'error');
                 }
                 return currPlaced;
               });
@@ -393,44 +446,89 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
   }, [playVoice, playSfx, playerCards.length]);
 
 
-  const handlePlaceBet = (spot: 'player' | 'tie' | 'banker') => {
-    if (serverPhase !== 'BETTING_OPEN' && serverPhase !== 'LAST_CALL') {
+  const handlePlaceBet = (spot: AllBetKey, explicitAmount?: number) => {
+    if (!isBettingOpen) {
       showToast('Betting is closed for this round!', 'error');
       return;
     }
-    if (balance < selectedChip) {
+    const betSize = explicitAmount !== undefined ? explicitAmount : selectedChip;
+    if (balance < betSize) {
       showToast('Insufficient credits!', 'error');
       return;
     }
     playSfx('CHIP_PLACE');
-    setBalance(prev => prev - selectedChip);
-    setBetAmounts(prev => ({
-      ...prev,
-      [spot]: prev[spot] + selectedChip,
-    }));
+    setBalance(prev => prev - betSize);
+    setBetAmounts(prev => ({ ...prev, [spot]: prev[spot] + betSize }));
+    setBetHistory(prev => [...prev, { spot, amount: betSize }]);
+  };
+
+  const handleUndoBet = () => {
+    if (betHistory.length === 0) return;
+    const last = betHistory[betHistory.length - 1]!;
+    setBalance(prev => prev + last.amount);
+    setBetAmounts(prev => ({ ...prev, [last.spot]: Math.max(0, prev[last.spot] - last.amount) }));
+    setBetHistory(prev => prev.slice(0, -1));
   };
 
   const handleClearBets = () => {
-    if (serverPhase !== 'BETTING_OPEN' && serverPhase !== 'LAST_CALL') return;
-    const totalReturned = betAmounts.player + betAmounts.tie + betAmounts.banker;
+    if (!isBettingOpen) return;
+    const totalReturned = (Object.values(betAmounts) as number[]).reduce((s, v) => s + v, 0);
     if (totalReturned > 0) playSfx('CHIP_STACK');
     setBalance(prev => prev + totalReturned);
-    setBetAmounts({ player: 0, tie: 0, banker: 0 });
-    setPlacedBets({ player: 0, tie: 0, banker: 0 });
+    setBetAmounts({ ...ZERO_BETS });
+    setPlacedBets({ ...ZERO_BETS });
+    setBetHistory([]);
   };
 
   const handleConfirmBets = () => {
-    if (serverPhase !== 'BETTING_OPEN' && serverPhase !== 'LAST_CALL') {
+    if (!isBettingOpen) {
       showToast('Betting is closed for this round!', 'error');
       return;
     }
-    const totalBet = betAmounts.player + betAmounts.tie + betAmounts.banker;
+    const totalBet = (Object.values(betAmounts) as number[]).reduce((s, v) => s + v, 0);
     if (totalBet === 0) {
-      showToast('Please place at least one bet!', 'info');
+      showToast('Place at least one bet!', 'info');
       return;
     }
     setPlacedBets({ ...betAmounts });
-    showToast('Bets confirmed! Waiting for dealer...', 'success');
+    showToast('Bets locked in! Waiting for dealer...', 'success');
+  };
+
+  // ── Computed render values ──────────────────────────────────────────────────
+  const totalMainBets = betAmounts.player + betAmounts.tie + betAmounts.banker;
+  const totalBet = (Object.values(betAmounts) as number[]).reduce((s, v) => s + v, 0);
+  const playerPct  = totalMainBets > 0 ? Math.round((betAmounts.player / totalMainBets) * 100) : 40;
+  const tiePct     = totalMainBets > 0 ? Math.round((betAmounts.tie    / totalMainBets) * 100) : 20;
+  const bankerPct  = totalMainBets > 0 ? 100 - playerPct - tiePct : 40;
+
+  // ── Drag & Drop Event Handlers ─────────────────────────────────────────────
+  const [activeDragOver, setActiveDragOver] = useState<AllBetKey | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, val: number) => {
+    e.dataTransfer.setData('text/plain', val.toString());
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent, spot: AllBetKey) => {
+    e.preventDefault();
+    if (isBettingOpen) {
+      setActiveDragOver(spot);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setActiveDragOver(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, spot: AllBetKey) => {
+    e.preventDefault();
+    setActiveDragOver(null);
+    if (!isBettingOpen) return;
+    const rawVal = e.dataTransfer.getData('text/plain');
+    const val = parseInt(rawVal, 10);
+    if (!isNaN(val) && val > 0) {
+      handlePlaceBet(spot, val);
+    }
   };
 
   const handleSendMessage = (e?: React.FormEvent) => {
@@ -557,13 +655,13 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
         {/* LEFT COLUMN: Live Feed + Betting Spots + Chips (Spans 8 cols) */}
         <div className="lg:col-span-8 flex flex-col gap-3">
           {/* Live Video / Dealer Canvas */}
-          <div className="relative w-full h-[280px] sm:h-[360px] md:h-[420px] bg-[#07090e] border border-[#1b202e] rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center">
+          <div className="relative w-full h-[300px] sm:h-[380px] md:h-[460px] bg-[#07090e] border border-[#1b202e] rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center">
             {/* Live Dealer Background Image */}
             <img
               src={ASSETS.baccarat}
               alt="Live Baccarat Dealer"
               referrerPolicy="no-referrer"
-              className="w-full h-full object-cover object-center"
+              className="w-full h-full object-cover object-top"
             />
 
             {/* Vignette Gradient Overlay */}
@@ -600,14 +698,14 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
             )}
 
             {/* Top Right: Table Info Overlay */}
-            <div className="absolute top-3 right-3 md:top-4 md:right-4 z-10 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-2 md:px-2.5 py-1 flex items-center gap-2 text-[10px] md:text-[11px] text-zinc-300">
-              <div className="flex items-center gap-1">
+            <div className="absolute top-3 right-3 md:top-4 md:right-4 z-10 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-2 md:px-2.5 py-1 flex items-center gap-2 text-[10px] md:text-[11px] text-zinc-300 max-w-[140px] md:max-w-none">
+              <div className="flex items-center gap-1 shrink-0">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
                 <span className="w-2 h-2 rounded-full bg-emerald-500 absolute" />
                 <span className="font-semibold ml-2">1,248</span>
               </div>
               <span className="text-zinc-500">|</span>
-              <span className="text-zinc-400">{tableId}</span>
+              <span className="text-zinc-400 truncate">{tableId}</span>
             </div>
 
             {/* Center Screen Result Banner Overlay */}
@@ -647,36 +745,47 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
                   )}
 
                   <AnimatePresence>
-                    {playerCards.map((card, index) => {
-                      if (!card.isDealt) return null;
+                    {/* Player 3rd card goes LEFT — render order: [2, 0, 1] */}
+                    {(playerCards.length === 3 ? [2, 0, 1] : [0, 1]).map((index) => {
+                      const card = playerCards[index];
+                      if (!card || !card.isDealt) return null;
+                      const isThird = index === 2;
                       return (
-                        <motion.div
+                        /* For the 3rd card, outer container uses rotated dimensions so layout stays intact */
+                        <div
                           key={`p-card-${index}`}
-                          initial={{ x: 200, y: -250, rotate: 45, scale: 0.2, opacity: 0 }}
-                          animate={{ x: 0, y: 0, rotate: 0, scale: 1, opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          transition={{ type: "spring", stiffness: 120, damping: 14 }}
-                          className="w-8 h-12 md:w-10 md:h-14 perspective relative"
+                          style={isThird
+                            ? { width: 66, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }
+                            : {}}
                         >
                           <motion.div
-                            animate={{ rotateY: card.isFlipped ? 180 : 0 }}
-                            transition={{ duration: 0.4, ease: "easeInOut" }}
-                            className="w-full h-full preserve-3d relative"
+                            initial={{ x: 200, y: -250, rotate: 45, scale: 0.2, opacity: 0 }}
+                            animate={{ x: 0, y: 0, rotate: isThird ? 90 : 0, scale: 1, opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ type: 'spring', stiffness: 120, damping: 14 }}
+                            className="perspective relative"
+                            style={{ width: 44, height: 66 }}
                           >
-                            {/* Card Back */}
-                            <div className="absolute inset-0 bg-gradient-to-br from-blue-800 to-blue-950 rounded border-2 border-white/90 shadow-xl flex items-center justify-center backface-hidden">
-                              <div className="w-full h-full border border-blue-600/30 rounded flex items-center justify-center">
-                                <span className="text-white/20 text-[8px] font-black tracking-widest rotate-45">BETLOG</span>
+                            <motion.div
+                              animate={{ rotateY: card.isFlipped ? 180 : 0 }}
+                              transition={{ duration: 0.4, ease: 'easeInOut' }}
+                              className="w-full h-full preserve-3d relative"
+                            >
+                              {/* Card Back */}
+                              <div className="absolute inset-0 bg-gradient-to-br from-blue-800 to-blue-950 rounded border-2 border-white/90 shadow-xl flex items-center justify-center backface-hidden">
+                                <div className="w-full h-full border border-blue-600/30 rounded flex items-center justify-center">
+                                  <span className="text-white/20 text-[8px] font-black tracking-widest rotate-45">BETLOG</span>
+                                </div>
                               </div>
-                            </div>
-                            {/* Card Front */}
-                            <div className="absolute inset-0 bg-white rounded border border-zinc-300 shadow-xl flex flex-col justify-between p-1 select-none rotate-y-180 backface-hidden">
-                              <div className="text-[10px] md:text-[11px] font-bold leading-none text-black">{card.value}</div>
-                              <div className={`text-xs md:text-sm self-center leading-none ${card.color}`}>{card.suit}</div>
-                              <div className="text-[10px] md:text-[11px] font-bold leading-none self-end rotate-180 text-black">{card.value}</div>
-                            </div>
+                              {/* Card Front */}
+                              <div className="absolute inset-0 bg-white rounded border border-zinc-300 shadow-xl flex flex-col justify-between p-1.5 select-none rotate-y-180 backface-hidden">
+                                <div className="text-xs font-bold leading-none text-black">{card.value}</div>
+                                <div className={`text-sm self-center leading-none ${card.color}`}>{card.suit}</div>
+                                <div className="text-xs font-bold leading-none self-end rotate-180 text-black">{card.value}</div>
+                              </div>
+                            </motion.div>
                           </motion.div>
-                        </motion.div>
+                        </div>
                       );
                     })}
                   </AnimatePresence>
@@ -692,34 +801,43 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
                   <AnimatePresence>
                     {bankerCards.map((card, index) => {
                       if (!card.isDealt) return null;
+                      const isThird = index === 2;
                       return (
-                        <motion.div
+                        /* For the 3rd card, outer container uses rotated dimensions so layout stays intact */
+                        <div
                           key={`b-card-${index}`}
-                          initial={{ x: 100, y: -250, rotate: 45, scale: 0.2, opacity: 0 }}
-                          animate={{ x: 0, y: 0, rotate: 0, scale: 1, opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          transition={{ type: "spring", stiffness: 120, damping: 14 }}
-                          className="w-8 h-12 md:w-10 md:h-14 perspective relative"
+                          style={isThird
+                            ? { width: 66, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }
+                            : {}}
                         >
                           <motion.div
-                            animate={{ rotateY: card.isFlipped ? 180 : 0 }}
-                            transition={{ duration: 0.4, ease: "easeInOut" }}
-                            className="w-full h-full preserve-3d relative"
+                            initial={{ x: 100, y: -250, rotate: 45, scale: 0.2, opacity: 0 }}
+                            animate={{ x: 0, y: 0, rotate: isThird ? 90 : 0, scale: 1, opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ type: 'spring', stiffness: 120, damping: 14 }}
+                            className="perspective relative"
+                            style={{ width: 44, height: 66 }}
                           >
-                            {/* Card Back */}
-                            <div className="absolute inset-0 bg-gradient-to-br from-red-800 to-red-950 rounded border-2 border-white/90 shadow-xl flex items-center justify-center backface-hidden">
-                              <div className="w-full h-full border border-red-600/30 rounded flex items-center justify-center">
-                                <span className="text-white/20 text-[8px] font-black tracking-widest rotate-45">BETLOG</span>
+                            <motion.div
+                              animate={{ rotateY: card.isFlipped ? 180 : 0 }}
+                              transition={{ duration: 0.4, ease: 'easeInOut' }}
+                              className="w-full h-full preserve-3d relative"
+                            >
+                              {/* Card Back */}
+                              <div className="absolute inset-0 bg-gradient-to-br from-red-800 to-red-950 rounded border-2 border-white/90 shadow-xl flex items-center justify-center backface-hidden">
+                                <div className="w-full h-full border border-red-600/30 rounded flex items-center justify-center">
+                                  <span className="text-white/20 text-[8px] font-black tracking-widest rotate-45">BETLOG</span>
+                                </div>
                               </div>
-                            </div>
-                            {/* Card Front */}
-                            <div className="absolute inset-0 bg-white rounded border border-zinc-300 shadow-xl flex flex-col justify-between p-1 select-none rotate-y-180 backface-hidden">
-                              <div className="text-[10px] md:text-[11px] font-bold leading-none text-black">{card.value}</div>
-                              <div className={`text-xs md:text-sm self-center leading-none ${card.color}`}>{card.suit}</div>
-                              <div className="text-[10px] md:text-[11px] font-bold leading-none self-end rotate-180 text-black">{card.value}</div>
-                            </div>
+                              {/* Card Front */}
+                              <div className="absolute inset-0 bg-white rounded border border-zinc-300 shadow-xl flex flex-col justify-between p-1.5 select-none rotate-y-180 backface-hidden">
+                                <div className="text-xs font-bold leading-none text-black">{card.value}</div>
+                                <div className={`text-sm self-center leading-none ${card.color}`}>{card.suit}</div>
+                                <div className="text-xs font-bold leading-none self-end rotate-180 text-black">{card.value}</div>
+                              </div>
+                            </motion.div>
                           </motion.div>
-                        </motion.div>
+                        </div>
                       );
                     })}
                   </AnimatePresence>
@@ -735,154 +853,310 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome }) => {
             </div>
           </div>
 
-          {/* Betting Spots Grid: PLAYER / TIE / BANKER */}
-          <div className="grid grid-cols-3 gap-2 md:gap-3">
-            {/* PLAYER Spot */}
-            <button
-              onClick={() => handlePlaceBet('player')}
-              className={`h-20 sm:h-24 md:h-28 rounded-xl md:rounded-2xl flex flex-col items-center justify-center border transition-all cursor-pointer ${
-                winArea === 'player' && winPayoutPulse
-                  ? 'winning-glow-pulse bg-[#0a1628] border-amber-400'
-                  : betAmounts.player > 0
-                  ? 'bg-[#0a1628] border-[#38bdf8] shadow-[0_0_15px_rgba(56,189,248,0.25)]'
-                  : (serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL')
-                  ? 'bg-[#080d18] border-[#1a2336]/60 hover:border-[#38bdf8]/50 shadow-[0_0_8px_rgba(56,189,248,0.05)]'
-                  : 'bg-[#080d18] border-zinc-900 opacity-60 cursor-not-allowed'
-              }`}
-            >
-              <span className="text-[#38bdf8] font-black text-sm sm:text-base md:text-lg tracking-wider uppercase">
-                PLAYER
-              </span>
-              <span className="text-zinc-400 font-semibold text-xs md:text-sm mt-0.5">
-                1:1
-              </span>
-              <span className="text-zinc-600 text-[9px] mt-0.5">even money</span>
-              {betAmounts.player > 0 && (
-                <div className="mt-1 bg-[#2563eb] text-white font-black text-[10px] px-2 py-0.5 rounded-full">
-                  ₱{betAmounts.player}
-                </div>
-              )}
-            </button>
+          {/* ── Evolution-Style 5-Column Betting Panel ────────────────────────── */}
+          <div className="rounded-xl overflow-hidden border border-[#1c2030] shadow-2xl mt-0">
+            <div className="grid min-h-[148px] md:min-h-[186px]" style={{ gridTemplateColumns: betGridCols }}>
 
-            {/* TIE Spot */}
-            <button
-              onClick={() => handlePlaceBet('tie')}
-              className={`h-20 sm:h-24 md:h-28 rounded-xl md:rounded-2xl flex flex-col items-center justify-center border transition-all cursor-pointer ${
-                winArea === 'tie' && winPayoutPulse
-                  ? 'winning-glow-pulse bg-[#081b12] border-amber-400'
-                  : betAmounts.tie > 0
-                  ? 'bg-[#081b12] border-[#22c55e] shadow-[0_0_15px_rgba(34,197,94,0.25)]'
-                  : (serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL')
-                  ? 'bg-[#07130e] border-[#152a1e]/60 hover:border-[#22c55e]/50 shadow-[0_0_8px_rgba(34,197,94,0.05)]'
-                  : 'bg-[#07130e] border-zinc-900 opacity-60 cursor-not-allowed'
-              }`}
-            >
-              <span className="text-[#22c55e] font-black text-sm sm:text-base md:text-lg tracking-wider uppercase">
-                TIE
-              </span>
-              <span className="text-zinc-400 font-semibold text-xs md:text-sm mt-0.5">
-                9:1
-              </span>
-              {betAmounts.tie > 0 && (
-                <div className="mt-1 bg-[#16a34a] text-white font-black text-[10px] px-2 py-0.5 rounded-full">
-                  ₱{betAmounts.tie}
-                </div>
-              )}
-            </button>
+              {/* ── LEFT SIDE BETS ─────────────────────────────────────── */}
+              <div className="flex flex-col bg-[#0c0e15] border-r border-[#1c2030] divide-y divide-[#1c2030]">
+                {/* Perfect Pair */}
+                <button
+                  id="bet-perfectPair"
+                  onClick={() => handlePlaceBet('perfectPair')}
+                  onDragOver={(e) => handleDragOver(e, 'perfectPair')}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, 'perfectPair')}
+                  disabled={!isBettingOpen}
+                  className={`flex-1 flex flex-col items-center justify-center gap-0.5 px-1.5 py-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${winSideBets.has('perfectPair') && winPayoutPulse ? 'winning-glow-pulse bg-[#1a1200]' : 'hover:bg-[#141820]'} ${activeDragOver === 'perfectPair' ? 'drag-over-active' : ''}`}
+                >
+                  <span className="text-[9px] font-black text-zinc-300 uppercase tracking-wide leading-tight text-center">PERFECT<br/>PAIR</span>
+                  <span className="text-[10px] font-bold text-amber-400 mt-0.5">25:1</span>
+                  {betAmounts.perfectPair > 0 && <BetChipStack amount={betAmounts.perfectPair} size={24} />}
+                </button>
+                {/* Player Bonus */}
+                <button
+                  id="bet-playerBonus"
+                  onClick={() => handlePlaceBet('playerBonus')}
+                  onDragOver={(e) => handleDragOver(e, 'playerBonus')}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, 'playerBonus')}
+                  disabled={!isBettingOpen}
+                  className={`flex-1 flex flex-col items-center justify-center gap-0.5 px-1.5 py-1.5 hover:bg-[#141820] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${activeDragOver === 'playerBonus' ? 'drag-over-active' : ''}`}
+                >
+                  <span className="text-[9px] font-black text-zinc-300 uppercase tracking-wide leading-tight text-center">PLAYER<br/>BONUS</span>
+                  {betAmounts.playerBonus > 0 && <BetChipStack amount={betAmounts.playerBonus} size={24} />}
+                </button>
+                {/* Player Pair */}
+                <button
+                  id="bet-playerPair"
+                  onClick={() => handlePlaceBet('playerPair')}
+                  onDragOver={(e) => handleDragOver(e, 'playerPair')}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, 'playerPair')}
+                  disabled={!isBettingOpen}
+                  className={`flex-1 flex flex-col items-center justify-center gap-0.5 px-1.5 py-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${winSideBets.has('playerPair') && winPayoutPulse ? 'winning-glow-pulse bg-[#0a0f1e]' : 'hover:bg-[#141820]'} ${activeDragOver === 'playerPair' ? 'drag-over-active' : ''}`}
+                >
+                  <span className="text-[9px] font-black text-zinc-300 uppercase tracking-wide leading-tight text-center">PLAYER<br/>PAIR</span>
+                  <span className="text-[10px] font-bold text-amber-400 mt-0.5">11:1</span>
+                  {betAmounts.playerPair > 0 && <BetChipStack amount={betAmounts.playerPair} size={24} />}
+                </button>
+              </div>
 
-            {/* BANKER Spot */}
-            <button
-              onClick={() => handlePlaceBet('banker')}
-              className={`h-20 sm:h-24 md:h-28 rounded-xl md:rounded-2xl flex flex-col items-center justify-center border transition-all cursor-pointer ${
-                winArea === 'banker' && winPayoutPulse
-                  ? 'winning-glow-pulse bg-[#220c0e] border-amber-400'
-                  : betAmounts.banker > 0
-                  ? 'bg-[#220c0e] border-[#ef4444] shadow-[0_0_15px_rgba(239,68,68,0.25)]'
-                  : (serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL')
-                  ? 'bg-[#18090b] border-[#331418]/60 hover:border-[#ef4444]/50 shadow-[0_0_8px_rgba(239,68,68,0.05)]'
-                  : 'bg-[#18090b] border-zinc-900 opacity-60 cursor-not-allowed'
-              }`}
-            >
-              <span className="text-[#ef4444] font-black text-sm sm:text-base md:text-lg tracking-wider uppercase">
-                BANKER
-              </span>
-              <span className="text-zinc-400 font-semibold text-xs md:text-sm mt-0.5">
-                0.95:1
-              </span>
-              <span className="text-zinc-600 text-[9px] mt-0.5">5% commission</span>
-              {betAmounts.banker > 0 && (
-                <div className="mt-1 bg-[#dc2626] text-white font-black text-[10px] px-2 py-0.5 rounded-full">
-                  ₱{betAmounts.banker}
+              {/* ── PLAYER MAIN BET ─────────────────────────────────────── */}
+              <button
+                id="bet-player"
+                onClick={() => handlePlaceBet('player')}
+                onDragOver={(e) => handleDragOver(e, 'player')}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, 'player')}
+                disabled={!isBettingOpen}
+                className={`relative flex flex-col items-start justify-between p-3 md:p-4 border-r border-[#1c2030] transition-all duration-200 cursor-pointer disabled:cursor-not-allowed overflow-hidden ${
+                  winArea === 'player' && winPayoutPulse
+                    ? 'winning-glow-pulse bg-[#0b1828]'
+                    : betAmounts.player > 0
+                    ? 'bg-[#0a1628] shadow-[inset_0_0_20px_rgba(56,189,248,0.06)]'
+                    : isBettingOpen
+                    ? 'bg-[#080e1c] hover:bg-[#0a1628]'
+                    : 'bg-[#070c18] opacity-60'
+                } ${activeDragOver === 'player' ? 'drag-over-active' : ''}`}
+              >
+                {/* Chinese watermark */}
+                <span className="absolute right-2 bottom-1 text-[52px] md:text-[64px] font-black text-blue-900/20 select-none leading-none pointer-events-none">闲</span>
+                {/* Top row: label + bet badge */}
+                <div className="flex items-start justify-between w-full z-10">
+                  <div>
+                    <span className="text-[11px] md:text-xs font-black text-[#38bdf8] uppercase tracking-widest block">PLAYER</span>
+                    <span className="text-[9px] text-zinc-500 font-semibold">1:1 even money</span>
+                  </div>
+                  {betAmounts.player > 0 && (
+                    <BetChipStack amount={betAmounts.player} size={30} />
+                  )}
                 </div>
-              )}
-            </button>
+                {/* Bottom: distribution bar */}
+                <div className="w-full z-10">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[9px] text-zinc-600">{totalMainBets > 0 ? `${playerPct}%` : '—'}</span>
+                  </div>
+                  <div className="w-full h-1 bg-[#0d1726] rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-[#38bdf8] to-[#0284c7] rounded-full transition-all duration-700" style={{ width: `${playerPct}%` }} />
+                  </div>
+                </div>
+              </button>
+
+              {/* ── TIE CENTER ──────────────────────────────────────────── */}
+              <button
+                id="bet-tie"
+                onClick={() => handlePlaceBet('tie')}
+                onDragOver={(e) => handleDragOver(e, 'tie')}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, 'tie')}
+                disabled={!isBettingOpen}
+                className={`relative flex flex-col items-center justify-between p-2 md:p-3 border-r border-[#1c2030] transition-all duration-200 cursor-pointer disabled:cursor-not-allowed overflow-hidden ${
+                  winArea === 'tie' && winPayoutPulse
+                    ? 'winning-glow-pulse bg-[#061410]'
+                    : betAmounts.tie > 0
+                    ? 'bg-[#071410] shadow-[inset_0_0_20px_rgba(34,197,94,0.06)]'
+                    : isBettingOpen
+                    ? 'bg-[#050e09] hover:bg-[#071410]'
+                    : 'bg-[#040b07] opacity-60'
+                } ${activeDragOver === 'tie' ? 'drag-over-active' : ''}`}
+              >
+                <span className="absolute inset-0 flex items-center justify-center text-[52px] md:text-[62px] font-black text-green-900/15 select-none pointer-events-none">和</span>
+                <div className="z-10 text-center">
+                  <span className="text-[10px] md:text-[11px] font-black text-[#22c55e] uppercase tracking-widest block">TIE</span>
+                  <span className="text-[9px] text-zinc-500 font-semibold">9:1</span>
+                </div>
+                {betAmounts.tie > 0 && (
+                  <div className="z-10">
+                    <BetChipStack amount={betAmounts.tie} size={30} />
+                  </div>
+                )}
+                <div className="w-full z-10">
+                  <div className="flex justify-center mb-1">
+                    <span className="text-[9px] text-zinc-600">{totalMainBets > 0 ? `${tiePct}%` : '—'}</span>
+                  </div>
+                  <div className="w-full h-1 bg-[#061210] rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-[#22c55e] to-[#16a34a] rounded-full transition-all duration-700" style={{ width: `${tiePct}%` }} />
+                  </div>
+                </div>
+              </button>
+
+              {/* ── BANKER MAIN BET ─────────────────────────────────────── */}
+              <button
+                id="bet-banker"
+                onClick={() => handlePlaceBet('banker')}
+                onDragOver={(e) => handleDragOver(e, 'banker')}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, 'banker')}
+                disabled={!isBettingOpen}
+                className={`relative flex flex-col items-end justify-between p-3 md:p-4 border-r border-[#1c2030] transition-all duration-200 cursor-pointer disabled:cursor-not-allowed overflow-hidden ${
+                  winArea === 'banker' && winPayoutPulse
+                    ? 'winning-glow-pulse bg-[#1c0709]'
+                    : betAmounts.banker > 0
+                    ? 'bg-[#190608] shadow-[inset_0_0_20px_rgba(239,68,68,0.06)]'
+                    : isBettingOpen
+                    ? 'bg-[#130407] hover:bg-[#190608]'
+                    : 'bg-[#0f0306] opacity-60'
+                } ${activeDragOver === 'banker' ? 'drag-over-active' : ''}`}
+              >
+                {/* Chinese watermark */}
+                <span className="absolute left-2 bottom-1 text-[52px] md:text-[64px] font-black text-red-900/20 select-none leading-none pointer-events-none">庄</span>
+                {/* Top row: bet badge + label */}
+                <div className="flex items-start justify-between w-full z-10">
+                  {betAmounts.banker > 0 && (
+                    <BetChipStack amount={betAmounts.banker} size={30} />
+                  )}
+                  <div className="text-right ml-auto">
+                    <span className="text-[11px] md:text-xs font-black text-[#ef4444] uppercase tracking-widest block">BANKER</span>
+                    <span className="text-[9px] text-zinc-500 font-semibold">0.95:1</span>
+                  </div>
+                </div>
+                {/* Bottom: distribution bar */}
+                <div className="w-full z-10">
+                  <div className="flex items-center justify-end mb-1">
+                    <span className="text-[9px] text-zinc-600">{totalMainBets > 0 ? `${bankerPct}%` : '—'}</span>
+                  </div>
+                  <div className="w-full h-1 bg-[#1a0608] rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-[#ef4444] to-[#b91c1c] rounded-full transition-all duration-700" style={{ width: `${bankerPct}%` }} />
+                  </div>
+                </div>
+              </button>
+
+              {/* ── RIGHT SIDE BETS ─────────────────────────────────────── */}
+              <div className="flex flex-col bg-[#0c0e15] divide-y divide-[#1c2030]">
+                {/* Either Pair */}
+                <button
+                  id="bet-eitherPair"
+                  onClick={() => handlePlaceBet('eitherPair')}
+                  onDragOver={(e) => handleDragOver(e, 'eitherPair')}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, 'eitherPair')}
+                  disabled={!isBettingOpen}
+                  className={`flex-1 flex flex-col items-center justify-center gap-0.5 px-1.5 py-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${winSideBets.has('eitherPair') && winPayoutPulse ? 'winning-glow-pulse bg-[#1a1200]' : 'hover:bg-[#141820]'} ${activeDragOver === 'eitherPair' ? 'drag-over-active' : ''}`}
+                >
+                  <span className="text-[9px] font-black text-zinc-300 uppercase tracking-wide leading-tight text-center">EITHER<br/>PAIR</span>
+                  <span className="text-[10px] font-bold text-amber-400 mt-0.5">5:1</span>
+                  {betAmounts.eitherPair > 0 && <BetChipStack amount={betAmounts.eitherPair} size={24} />}
+                </button>
+                {/* Banker Bonus */}
+                <button
+                  id="bet-bankerBonus"
+                  onClick={() => handlePlaceBet('bankerBonus')}
+                  onDragOver={(e) => handleDragOver(e, 'bankerBonus')}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, 'bankerBonus')}
+                  disabled={!isBettingOpen}
+                  className={`flex-1 flex flex-col items-center justify-center gap-0.5 px-1.5 py-1.5 hover:bg-[#141820] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${activeDragOver === 'bankerBonus' ? 'drag-over-active' : ''}`}
+                >
+                  <span className="text-[9px] font-black text-zinc-300 uppercase tracking-wide leading-tight text-center">BANKER<br/>BONUS</span>
+                  {betAmounts.bankerBonus > 0 && <BetChipStack amount={betAmounts.bankerBonus} size={24} />}
+                </button>
+                {/* Banker Pair */}
+                <button
+                  id="bet-bankerPair"
+                  onClick={() => handlePlaceBet('bankerPair')}
+                  onDragOver={(e) => handleDragOver(e, 'bankerPair')}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, 'bankerPair')}
+                  disabled={!isBettingOpen}
+                  className={`flex-1 flex flex-col items-center justify-center gap-0.5 px-1.5 py-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${winSideBets.has('bankerPair') && winPayoutPulse ? 'winning-glow-pulse bg-[#1a0608]' : 'hover:bg-[#141820]'} ${activeDragOver === 'bankerPair' ? 'drag-over-active' : ''}`}
+                >
+                  <span className="text-[9px] font-black text-zinc-300 uppercase tracking-wide leading-tight text-center">BANKER<br/>PAIR</span>
+                  <span className="text-[10px] font-bold text-amber-400 mt-0.5">11:1</span>
+                  {betAmounts.bankerPair > 0 && <BetChipStack amount={betAmounts.bankerPair} size={24} />}
+                </button>
+              </div>
+
+            </div>
           </div>
 
-
-          {/* Chips Tray & Action Buttons */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 md:gap-3 mt-1">
-            {/* Chips Capsule Box */}
-            <div className="bg-[#0b0e15] border border-[#1d2230] rounded-2xl px-2.5 md:px-5 py-2 md:py-2.5 flex items-center justify-between sm:justify-start gap-2 md:gap-3.5 shadow-xl overflow-x-auto">
-              {chips.map((chip) => {
-                const isSelected = selectedChip === chip.value;
-                return (
-                  <div key={chip.value} className="relative flex flex-col items-center shrink-0">
-                    {/* Top yellow arc highlight if selected */}
-                    {isSelected && (
-                      <div className="w-6 md:w-8 h-1 bg-[#F5BA15] rounded-full mb-1 shadow-[0_0_6px_#F5BA15]" />
-                    )}
-                    <button
-                      onClick={() => setSelectedChip(chip.value)}
-                      className={`w-9 h-9 md:w-12 md:h-12 rounded-full bg-gradient-to-br ${chip.color} border-2 ${
-                        chip.border
-                      } flex items-center justify-center text-white font-black text-xs md:text-sm shadow-md transition-transform hover:scale-105 active:scale-95 cursor-pointer ${
-                        isSelected ? 'ring-2 ring-[#F5BA15] ring-offset-2 ring-offset-[#0b0e15]' : ''
-                      }`}
-                    >
-                      <span className="drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-                        {chip.label}
-                      </span>
-                    </button>
-                  </div>
-                );
-              })}
-
-              {/* Clear Bet Action Button */}
-              <button
-                onClick={handleClearBets}
-                title="Clear Bets"
-                className="w-9 h-9 md:w-11 md:h-11 rounded-full bg-[#161a24] border border-[#282f42] flex items-center justify-center text-zinc-300 hover:text-white hover:border-zinc-500 transition-colors ml-1 shrink-0 cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5 md:w-5 md:h-5" />
-              </button>
+          {/* ── Pill Chip Tray ─────────────────────────────────────────────────── */}
+          <div className="flex items-center gap-1 md:gap-2 bg-[#08090e] border border-[#1c2030] rounded-2xl px-2 md:px-3 py-2 shadow-2xl mt-2 overflow-x-auto">
+            {/* Balance + Total Bet */}
+            <div className="hidden sm:flex flex-col items-start shrink-0">
+              <span className="text-[8px] text-zinc-600 uppercase tracking-wider font-semibold">Balance</span>
+              <span className="text-amber-400 font-extrabold text-[11px] md:text-sm tracking-wide leading-tight">
+                ₱{displayedBalance.toLocaleString()}
+              </span>
+            </div>
+            <div className="hidden sm:flex flex-col items-start shrink-0 border-l border-zinc-800/60 pl-2">
+              <span className="text-[8px] text-zinc-600 uppercase tracking-wider font-semibold">Total Bet</span>
+              <span className={`font-extrabold text-[11px] md:text-sm leading-tight transition-colors ${totalBet > 0 ? 'text-white' : 'text-zinc-600'}`}>
+                ₱{totalBet.toLocaleString()}
+              </span>
             </div>
 
-            {/* Right Action Controls: x2 and CONFIRM */}
-            <div className="flex items-center gap-2 md:gap-3">
-              <button onClick={() => {
-                if (gameState !== 'betting') return;
-                const doubledBets = {
-                  player: betAmounts.player * 2,
-                  tie: betAmounts.tie * 2,
-                  banker: betAmounts.banker * 2,
-                };
-                const totalAdditional = betAmounts.player + betAmounts.tie + betAmounts.banker;
-                if (balance < totalAdditional) {
-                  showToast('Insufficient balance to double bets!', 'error');
-                  return;
-                }
+            {/* Undo button */}
+            <button
+              id="btn-undo"
+              onClick={handleUndoBet}
+              disabled={betHistory.length === 0}
+              title="Undo last bet"
+              className="w-8 h-8 md:w-9 md:h-9 rounded-full bg-[#141720] border border-[#252c3f] flex items-center justify-center text-zinc-400 hover:text-white hover:border-zinc-500 disabled:opacity-25 disabled:cursor-not-allowed transition-all shrink-0 cursor-pointer"
+            >
+              <RotateCcw className="w-3 h-3 md:w-3.5 md:h-3.5" />
+            </button>
+
+            {/* Chips row — PokerChip SVG components, size responds to screen width */}
+            <div className="flex items-end gap-0.5 md:gap-1.5 flex-1 justify-center">
+              {chips.map((chip) => (
+                <PokerChip
+                  key={chip.value}
+                  value={chip.value}
+                  label={chip.label}
+                  isSelected={selectedChip === chip.value}
+                  size={chipSize}
+                  disabled={!isBettingOpen && false /* always selectable */}
+                  onClick={() => setSelectedChip(chip.value)}
+                  draggable={isBettingOpen}
+                  onDragStart={(e) => handleDragStart(e, chip.value)}
+                />
+              ))}
+            </div>
+
+            {/* Double ×2 */}
+            <button
+              id="btn-double"
+              onClick={() => {
+                if (!isBettingOpen) return;
+                const mainTotal = betAmounts.player + betAmounts.tie + betAmounts.banker;
+                if (balance < mainTotal) { showToast('Insufficient balance to double!', 'error'); return; }
                 playSfx('CHIP_STACK');
-                setBalance(prev => prev - totalAdditional);
-                setBetAmounts(doubledBets);
-              }} className="flex-1 sm:flex-initial bg-[#121620] hover:bg-[#1a202e] border border-[#242b3d] text-white font-bold text-xs md:text-sm px-4 md:px-5 py-2.5 md:py-3 rounded-xl transition-colors active:scale-95 shadow-md cursor-pointer">
-                ×2
-              </button>
-              <button onClick={handleConfirmBets} className="flex-2 sm:flex-initial bg-[#F5BA15] hover:bg-[#eab308] text-black font-black text-xs md:text-sm px-6 md:px-9 py-2.5 md:py-3 rounded-xl tracking-wider uppercase transition-transform active:scale-95 shadow-lg cursor-pointer">
-                CONFIRM
-              </button>
-            </div>
+                setBalance(prev => prev - mainTotal);
+                setBetAmounts(prev => ({
+                  ...prev,
+                  player: prev.player * 2,
+                  tie:    prev.tie    * 2,
+                  banker: prev.banker * 2,
+                }));
+              }}
+              className="hidden sm:flex w-8 h-8 md:w-9 md:h-9 items-center justify-center rounded-full bg-[#141720] border border-[#252c3f] text-zinc-300 hover:text-white hover:border-zinc-500 text-[10px] font-black transition-all shrink-0 cursor-pointer"
+              title="Double main bets"
+            >
+              ×2
+            </button>
+
+            {/* Clear button */}
+            <button
+              id="btn-clear"
+              onClick={handleClearBets}
+              title="Clear all bets"
+              className="w-8 h-8 md:w-9 md:h-9 rounded-full bg-[#141720] border border-[#252c3f] flex items-center justify-center text-zinc-400 hover:text-red-400 hover:border-red-900/60 transition-all shrink-0 cursor-pointer"
+            >
+              <X className="w-3 h-3 md:w-3.5 md:h-3.5" />
+            </button>
+
+            {/* Confirm button */}
+            <button
+              id="btn-confirm"
+              onClick={handleConfirmBets}
+              className="bg-[#F5BA15] hover:bg-[#eab308] active:scale-95 text-black font-black text-[10px] md:text-xs px-3 md:px-5 py-2 md:py-2.5 rounded-xl tracking-wider uppercase transition-all shadow-lg cursor-pointer shrink-0 whitespace-nowrap"
+            >
+              CONFIRM
+            </button>
           </div>
         </div>
+
 
         {/* RIGHT COLUMN: Roadmap / History / Chat Sidebar (Spans 4 cols) */}
         <div className="lg:col-span-4 bg-[#080a0f] border border-[#1b202e] rounded-2xl flex flex-col justify-between overflow-hidden shadow-2xl p-3.5 md:p-5">
