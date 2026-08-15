@@ -101,10 +101,11 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
   const [showResultBanner, setShowResultBanner] = useState<boolean>(false);
   const [winPayoutPulse, setWinPayoutPulse] = useState<boolean>(false);
   const [winArea, setWinArea] = useState<MainBetKey | null>(null);
-  const [winSideBets, setWinSideBets] = useState<Set<SideBetKey>>(new Set());
   const [lastTickPlayed, setLastTickPlayed] = useState<number>(0);
-  // Stable ref so the tick effect doesn't re-fire when playSfx identity changes
-  const lastTickRef = useRef<number>(0);
+  
+// Module-level variable to ensure the tick sound plays exactly once per second,
+// surviving any React StrictMode double-mounts or component re-renders.
+let globalLastTickPlayed = -1;
   
   // Game log/Roadmap states
   const [roadmap, setRoadmap] = useState<Array<{ t: string; c: string }>>([]);
@@ -208,9 +209,9 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
       (serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL') &&
       countdown <= 5 &&
       countdown > 0 &&
-      countdown !== lastTickRef.current
+      countdown !== globalLastTickPlayed
     ) {
-      lastTickRef.current = countdown;
+      globalLastTickPlayed = countdown;
       playSfxRef.current('LAST_5_SECONDS');
     }
   }, [countdown, serverPhase]);
