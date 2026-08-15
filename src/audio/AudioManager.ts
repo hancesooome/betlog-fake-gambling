@@ -109,6 +109,14 @@ export class AudioManager {
   /** Pending ambiance start (if interaction happened before preload finished) */
   private ambiancePending = false;
 
+  /**
+   * Single-instance SFX elements, keyed by SfxKey.
+   * Used by playSfxOnce() so that a repeat trigger of the SAME sound
+   * (e.g. the countdown tick) restarts instead of stacking overlapping clones.
+   */
+  private singleSfx = new Map<SfxKey, HTMLAudioElement>();
+
+
   private constructor(config?: AudioManagerConfig) {
     if (config?.voiceVolume    !== undefined) this.voiceVolume    = config.voiceVolume;
     if (config?.sfxVolume      !== undefined) this.sfxVolume      = config.sfxVolume;
@@ -288,7 +296,60 @@ export class AudioManager {
     el.play().catch(() => {});
   }
 
+  /**
+   * Play a sound effect as a SINGLE instance (non-polyphonic).
+   *
+   * Unlike playSfx(), repeated calls for the same key reuse ONE audio element:
+   * the previous playback is stopped and restarted from the beginning. This
+   * prevents overlapping/echoing when the same sound is retriggered rapidly
+   * (e.g. the once-per-second countdown tick).
+   *
+   * @param key       SFX key to play.
+   * @param maxSeconds Optional hard cap on playback length. If the asset is
+   *                   longer than this, playback auto-stops at the cap. Useful
+   *                   for assets that contain multiple internal beeps but where
+   *                   only the first short beep should be heard per trigger.
+   */
+  public playSfxOnce(key: SfxKey, maxSeconds?: number): void {
+    if (this.isMuted) return;
+    if (!this.userInteracted) return; // Mobile: don't attempt before gesture unlock
+
+    const src = SFX[key];
+
+    // Reuse (or lazily create) a dedicated element for this key.
+    let el = this.singleSfx.get(key);
+    if (!el) {
+      const cached = this.cache.get(src);
+      el = cached ? (cached.cloneNode() as HTMLAudioElement) : new Audio(src);
+      this.singleSfx.set(key, el);
+    }
+
+    // Clear any prior auto-stop timer stashed on the element.
+    const prevTimer = (el as any).__stopTimer as ReturnType<typeof setTimeout> | undefined;
+    if (prevTimer) {
+      clearTimeout(prevTimer);
+      (el as any).__stopTimer = undefined;
+    }
+
+    // Restart from the beginning — stops the currently playing instance.
+    el.pause();
+    el.volume      = key === 'AMBIANCE_LOOP' ? this.ambianceVolume : this.sfxVolume;
+    el.currentTime = 0;
+    el.play().catch(() => {});
+
+    // Optionally cap playback duration.
+    if (maxSeconds && maxSeconds > 0) {
+      const target = el;
+      (target as any).__stopTimer = setTimeout(() => {
+        target.pause();
+        target.currentTime = 0;
+        (target as any).__stopTimer = undefined;
+      }, maxSeconds * 1000);
+    }
+  }
+
   // ── Volume & Mute ──────────────────────────────────────────────────────────
+
 
   public setVoiceVolume(v: number): void {
     this.voiceVolume = Math.max(0, Math.min(1, v));
@@ -309,8 +370,21 @@ export class AudioManager {
   public mute(): void {
     this.isMuted = true;
     this.stopVoice();
+    this.stopSingleSfx();
     if (this.ambianceEl) this.ambianceEl.volume = 0;
   }
+
+  /** Stop and reset all single-instance SFX (used by mute/destroy). */
+  private stopSingleSfx(): void {
+    for (const el of this.singleSfx.values()) {
+      const timer = (el as any).__stopTimer as ReturnType<typeof setTimeout> | undefined;
+      if (timer) clearTimeout(timer);
+      (el as any).__stopTimer = undefined;
+      el.pause();
+      el.currentTime = 0;
+    }
+  }
+
 
   public unmute(): void {
     this.isMuted = false;
@@ -348,11 +422,18 @@ export class AudioManager {
   public destroy(): void {
     this.stopVoice();
     this.stopAmbiance();
+    this.stopSingleSfx();
 
     for (const el of this.cache.values()) {
       el.src = '';
     }
     this.cache.clear();
+
+    for (const el of this.singleSfx.values()) {
+      el.src = '';
+    }
+    this.singleSfx.clear();
+
 
     if (this.ambianceEl) {
       this.ambianceEl.src = '';

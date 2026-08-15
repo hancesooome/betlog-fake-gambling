@@ -68,7 +68,8 @@ function buildInserts(
   cx: number, cy: number,
   outerR: number, innerR: number,
   count: number, halfSpanDeg: number
-): JSX.Element[] {
+): React.JSX.Element[] {
+
   const step = 360 / count;
   return Array.from({ length: count }, (_, i) => (
     <path

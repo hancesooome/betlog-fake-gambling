@@ -57,8 +57,9 @@ const ASSETS = {
 export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpenParlays }) => {
   // ── Audio hooks ────────────────────────────────────────────────────────────
   const { playVoice } = useDealerVoice();
-  const { playSfx }   = useSoundEffects();
+  const { playSfx, playSfxOnce } = useSoundEffects();
   const { isMuted, toggleMute } = useAudio();
+
 
   // Game Play States
   const [balance, setBalance] = useState<number>(1250);
@@ -102,13 +103,14 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
   const [winPayoutPulse, setWinPayoutPulse] = useState<boolean>(false);
   const [winArea, setWinArea] = useState<MainBetKey | null>(null);
   const [winSideBets, setWinSideBets] = useState<Set<SideBetKey>>(new Set());
-  const [lastTickPlayed, setLastTickPlayed] = useState<number>(0);
-  
-// Module-level variable to ensure the tick sound plays exactly once per second,
-// surviving any React StrictMode double-mounts or component re-renders.
-let globalLastTickPlayed = -1;
-  
+
+  // Tracks the last countdown value that already played a tick, so each second
+  // fires exactly ONCE. A ref (not state) is used so it survives re-renders and
+  // React StrictMode double-invokes without triggering an extra render.
+  const lastTickRef = useRef<number>(-1);
+
   // Game log/Roadmap states
+
   const [roadmap, setRoadmap] = useState<Array<{ t: string; c: string }>>([]);
   const [stats, setStats] = useState({ player: 45, tie: 10, banker: 45, total: 120 });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' | null }>({ message: '', type: null });
@@ -200,22 +202,32 @@ let globalLastTickPlayed = -1;
     return () => clearTimeout(timer);
   }, [balance, displayedBalance]);
 
-  // Stable ref to playSfx — prevents tick effect from re-running on every render
-  const playSfxRef = useRef(playSfx);
-  useEffect(() => { playSfxRef.current = playSfx; });
+  // Stable ref to playSfxOnce — prevents tick effect from re-running on every render
+  const playSfxOnceRef = useRef(playSfxOnce);
+  useEffect(() => { playSfxOnceRef.current = playSfxOnce; });
 
-  // Last 5 seconds tick — fires exactly once per unique countdown value
+  // Last-5-seconds countdown tick.
+  //
+  // Fires exactly ONCE per unique countdown value (5,4,3,2,1). We guard with
+  // lastTickRef so a re-render or duplicate poll for the same second can't
+  // retrigger it, and we use playSfxOnce (single-instance) so consecutive
+  // ticks never overlap/echo. The clip is capped at ~0.9s so only the single
+  // short beep is heard, not the full multi-beep asset.
   useEffect(() => {
-    if (
+    const inCountdown =
       (serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL') &&
-      countdown <= 5 &&
       countdown > 0 &&
-      countdown !== globalLastTickPlayed
-    ) {
-      globalLastTickPlayed = countdown;
-      playSfxRef.current('LAST_5_SECONDS');
+      countdown <= 5;
+
+    if (inCountdown && countdown !== lastTickRef.current) {
+      lastTickRef.current = countdown;
+      playSfxOnceRef.current('LAST_5_SECONDS', 0.9);
+    } else if (!inCountdown && countdown > 5) {
+      // Reset once we leave the tick window so the next round can tick again.
+      lastTickRef.current = -1;
     }
   }, [countdown, serverPhase]);
+
 
   // ── Sync to Live Worker API ───────────────────────────────────────────────
   useEffect(() => {
