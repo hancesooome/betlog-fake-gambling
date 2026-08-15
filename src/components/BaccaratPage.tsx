@@ -1220,15 +1220,18 @@ let globalLastTickPlayed = -1;
                   <span>Winner</span>
                   <span>Multiplier</span>
                 </div>
-                {roadmap.map((item, idx) => (
-                  <div key={idx} className="flex justify-between py-0.5">
-                    <span>#R0{idx + 1021}</span>
-                    <span className={item.t === 'P' ? 'text-[#2563eb]' : item.t === 'B' ? 'text-[#dc2626]' : 'text-[#16a34a]'}>
-                      {item.t === 'P' ? 'Player' : item.t === 'B' ? 'Banker' : 'Tie'}
-                    </span>
-                    <span>{item.t === 'T' ? '8:1' : '1:1'}</span>
-                  </div>
-                ))}
+                {roadmap.slice().reverse().map((item, index) => {
+                  const originalIdx = roadmap.length - 1 - index;
+                  return (
+                    <div key={originalIdx} className="flex justify-between py-0.5 animate-in slide-in-from-top-1 duration-200">
+                      <span>#R0{originalIdx + 1021}</span>
+                      <span className={item.t === 'P' ? 'text-[#2563eb] font-bold' : item.t === 'B' ? 'text-[#dc2626] font-bold' : 'text-[#16a34a] font-bold'}>
+                        {item.t === 'P' ? 'Player' : item.t === 'B' ? 'Banker' : 'Tie'}
+                      </span>
+                      <span>{item.t === 'T' ? '8:1' : '1:1'}</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
