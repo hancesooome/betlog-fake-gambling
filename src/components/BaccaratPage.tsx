@@ -1147,14 +1147,6 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
               <X className="w-3 h-3 md:w-3.5 md:h-3.5" />
             </button>
 
-            {/* Confirm button */}
-            <button
-              id="btn-confirm"
-              onClick={handleConfirmBets}
-              className="bg-[#F5BA15] hover:bg-[#eab308] active:scale-95 text-black font-black text-[10px] md:text-xs px-3 md:px-5 py-2 md:py-2.5 rounded-xl tracking-wider uppercase transition-all shadow-lg cursor-pointer shrink-0 whitespace-nowrap"
-            >
-              CONFIRM
-            </button>
           </div>
         </div>
 

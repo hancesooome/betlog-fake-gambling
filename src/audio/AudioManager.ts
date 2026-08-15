@@ -169,18 +169,39 @@ export class AudioManager {
   }
 
   private attachInteractionListener(): void {
-    const onInteract = () => {
+    const unlock = () => {
       if (this.userInteracted) return;
+
+      // Resume / create a silent Web Audio context.
+      // This is the canonical way to ungate audio on mobile (iOS & Android).
+      try {
+        const AudioContextClass =
+          (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) {
+          const ctx = new AudioContextClass();
+          // Create a silent buffer and play it — this gesture-unlocks audio globally.
+          const buf = ctx.createBuffer(1, 1, 22050);
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(ctx.destination);
+          src.start(0);
+          ctx.resume().catch(() => {});
+        }
+      } catch (_) {}
+
       this.userInteracted = true;
-      this.startAmbiance();
-      window.removeEventListener('click',   onInteract);
-      window.removeEventListener('keydown', onInteract);
-      window.removeEventListener('touchstart', onInteract);
+
+      // Retry ambiance if it was blocked earlier
+      if (this.ambiancePending) {
+        this.ambiancePending = false;
+        this.startAmbiance();
+      }
     };
 
-    window.addEventListener('click',      onInteract, { once: false });
-    window.addEventListener('keydown',    onInteract, { once: false });
-    window.addEventListener('touchstart', onInteract, { once: false });
+    // passive: true is required for touchstart on iOS to not block scrolling
+    window.addEventListener('click',      unlock, { passive: true });
+    window.addEventListener('keydown',    unlock, { passive: true });
+    window.addEventListener('touchstart', unlock, { passive: true });
   }
 
   public startAmbiance(): void {
@@ -210,6 +231,7 @@ export class AudioManager {
    */
   public playVoice(key: VoiceKey): void {
     if (this.isMuted) return;
+    if (!this.userInteracted) return; // Mobile: don't attempt before gesture unlock
 
     const entry = VOICE_PACKS[key];
     const src   = Array.isArray(entry)
@@ -252,6 +274,7 @@ export class AudioManager {
    */
   public playSfx(key: SfxKey): void {
     if (this.isMuted) return;
+    if (!this.userInteracted) return; // Mobile: don't attempt before gesture unlock
 
     const src = SFX[key];
     // Clone from cache for zero-latency overlap
