@@ -34,11 +34,29 @@ import BetChipStack from './BetChipStack';
 type MainBetKey = 'player' | 'tie' | 'banker';
 type SideBetKey = 'playerPair' | 'bankerPair' | 'perfectPair' | 'eitherPair' | 'playerBonus' | 'bankerBonus';
 type AllBetKey = MainBetKey | SideBetKey;
+type CrowdBets = Record<MainBetKey, number>;
 
 const ZERO_BETS: Record<AllBetKey, number> = {
   player: 0, tie: 0, banker: 0,
   playerPair: 0, bankerPair: 0, perfectPair: 0, eitherPair: 0,
   playerBonus: 0, bankerBonus: 0,
+};
+
+const seedCrowdBets = (recentResults: Array<{ t: string }>): CrowdBets => {
+  const recent = recentResults.slice(-10);
+  const playerWins = recent.filter(result => result.t === 'P').length;
+  const bankerWins = recent.filter(result => result.t === 'B').length;
+  const decisiveRounds = playerWins + bankerWins;
+  const totalVolume = 9000 + Math.random() * 5000;
+  const tieShare = 0.05 + Math.random() * 0.04;
+  const playerShare = decisiveRounds > 0 ? playerWins / decisiveRounds : 0.48;
+  const mainVolume = totalVolume * (1 - tieShare);
+
+  return {
+    player: Math.round(mainVolume * playerShare),
+    banker: Math.round(mainVolume * (1 - playerShare)),
+    tie: Math.round(totalVolume * tieShare),
+  };
 };
 
 interface BaccaratPageProps {
@@ -112,6 +130,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
   // Game log/Roadmap states
 
   const [roadmap, setRoadmap] = useState<Array<{ t: string; c: string }>>([]);
+  const [crowdBets, setCrowdBets] = useState<CrowdBets>({ player: 4800, banker: 5200, tie: 600 });
   const [stats, setStats] = useState({ player: 45, tie: 10, banker: 45, total: 120 });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' | null }>({ message: '', type: null });
 
@@ -148,6 +167,37 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
 
   // ── Derived State ─────────────────────────────────────────────────────────
   const isBettingOpen = serverPhase === 'BETTING_OPEN' || serverPhase === 'LAST_CALL';
+  const recentTrend = (() => {
+    const recent = roadmap.slice(-5);
+    const counts = recent.reduce(
+      (result, item) => ({ ...result, [item.t]: result[item.t as 'P' | 'B' | 'T'] + 1 }),
+      { P: 0, B: 0, T: 0 },
+    );
+    if (counts.P > counts.B && counts.P > counts.T) return 'PLAYER';
+    if (counts.B > counts.P && counts.B > counts.T) return 'BANKER';
+    if (counts.T > counts.P && counts.T > counts.B) return 'TIE';
+    return null;
+  })();
+
+  // Start each round with a fresh table volume, weighted by the last 10 outcomes.
+  useEffect(() => {
+    setCrowdBets(seedCrowdBets(roadmap));
+  }, [roundId]);
+
+  // Simulate table bets while wagering is open. Cleanup freezes the final values.
+  useEffect(() => {
+    if (!isBettingOpen) return;
+
+    const interval = window.setInterval(() => {
+      setCrowdBets(prev => ({
+        player: prev.player + Math.random() * 50 * (recentTrend === 'PLAYER' ? 1.4 : 0.8),
+        banker: prev.banker + Math.random() * 50 * (recentTrend === 'BANKER' ? 1.4 : 0.8),
+        tie: prev.tie + Math.random() * 8 * (recentTrend === 'TIE' ? 1.4 : 1),
+      }));
+    }, 2000);
+
+    return () => window.clearInterval(interval);
+  }, [isBettingOpen, recentTrend, roundId]);
 
   // Helper score calculator (based on isFlipped property to satisfy visual score delay)
   const calculateScore = (cards: AnimatedCard[]) => {
@@ -588,11 +638,13 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
   };
 
   // ── Computed render values ──────────────────────────────────────────────────
-  const totalMainBets = betAmounts.player + betAmounts.tie + betAmounts.banker;
   const totalBet = (Object.values(betAmounts) as number[]).reduce((s, v) => s + v, 0);
-  const playerPct  = totalMainBets > 0 ? Math.round((betAmounts.player / totalMainBets) * 100) : 40;
-  const tiePct     = totalMainBets > 0 ? Math.round((betAmounts.tie    / totalMainBets) * 100) : 20;
-  const bankerPct  = totalMainBets > 0 ? 100 - playerPct - tiePct : 40;
+  const crowdTotal = crowdBets.player + crowdBets.tie + crowdBets.banker;
+  const crowdPlayerPct = Math.round((crowdBets.player / crowdTotal) * 100);
+  const crowdBankerPct = Math.round((crowdBets.banker / crowdTotal) * 100);
+  const crowdTiePct = 100 - crowdPlayerPct - crowdBankerPct;
+  const formatCrowdAmount = (amount: number) => `₱${Math.round(amount).toLocaleString('en-PH')}`;
+  const isCrowdLocked = !isBettingOpen;
 
   // ── Drag & Drop Event Handlers ─────────────────────────────────────────────
   const [activeDragOver, setActiveDragOver] = useState<AllBetKey | null>(null);
@@ -1021,11 +1073,16 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
                 </div>
                 {/* Bottom: distribution bar */}
                 <div className="w-full z-10">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[9px] text-zinc-600">{totalMainBets > 0 ? `${playerPct}%` : '—'}</span>
+                  <div className="flex items-center justify-between mb-1 min-h-3">
+                    <AnimatePresence mode="popLayout" initial={false}>
+                      <motion.span key={Math.round(crowdBets.player)} initial={{ opacity: 0.35, y: -2 }} animate={{ opacity: 1, y: 0 }} className="text-[9px] font-semibold text-sky-300/80 tabular-nums">
+                        {formatCrowdAmount(crowdBets.player)}&nbsp;&nbsp;{crowdPlayerPct}%
+                      </motion.span>
+                    </AnimatePresence>
+                    {isCrowdLocked && <span className="rounded bg-zinc-700/80 px-1 py-px text-[7px] font-black tracking-wider text-zinc-300">LOCKED</span>}
                   </div>
                   <div className="w-full h-1 bg-[#0d1726] rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-[#38bdf8] to-[#0284c7] rounded-full transition-all duration-700" style={{ width: `${playerPct}%` }} />
+                    <div className="h-full bg-gradient-to-r from-[#38bdf8] to-[#0284c7] rounded-full transition-all duration-700" style={{ width: `${crowdPlayerPct}%` }} />
                   </div>
                 </div>
               </button>
@@ -1059,11 +1116,16 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
                   </div>
                 )}
                 <div className="w-full z-10">
-                  <div className="flex justify-center mb-1">
-                    <span className="text-[9px] text-zinc-600">{totalMainBets > 0 ? `${tiePct}%` : '—'}</span>
+                  <div className="flex items-center justify-center gap-1 mb-1 min-h-3">
+                    <AnimatePresence mode="popLayout" initial={false}>
+                      <motion.span key={Math.round(crowdBets.tie)} initial={{ opacity: 0.35, y: -2 }} animate={{ opacity: 1, y: 0 }} className="text-[9px] font-semibold text-green-300/80 tabular-nums whitespace-nowrap">
+                        {formatCrowdAmount(crowdBets.tie)}&nbsp;&nbsp;{crowdTiePct}%
+                      </motion.span>
+                    </AnimatePresence>
+                    {isCrowdLocked && <span className="rounded bg-zinc-700/80 px-1 py-px text-[7px] font-black tracking-wider text-zinc-300">LOCKED</span>}
                   </div>
                   <div className="w-full h-1 bg-[#061210] rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-[#22c55e] to-[#16a34a] rounded-full transition-all duration-700" style={{ width: `${tiePct}%` }} />
+                    <div className="h-full bg-gradient-to-r from-[#22c55e] to-[#16a34a] rounded-full transition-all duration-700" style={{ width: `${crowdTiePct}%` }} />
                   </div>
                 </div>
               </button>
@@ -1100,11 +1162,16 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
                 </div>
                 {/* Bottom: distribution bar */}
                 <div className="w-full z-10">
-                  <div className="flex items-center justify-end mb-1">
-                    <span className="text-[9px] text-zinc-600">{totalMainBets > 0 ? `${bankerPct}%` : '—'}</span>
+                  <div className="flex items-center justify-between mb-1 min-h-3">
+                    {isCrowdLocked && <span className="rounded bg-zinc-700/80 px-1 py-px text-[7px] font-black tracking-wider text-zinc-300">LOCKED</span>}
+                    <AnimatePresence mode="popLayout" initial={false}>
+                      <motion.span key={Math.round(crowdBets.banker)} initial={{ opacity: 0.35, y: -2 }} animate={{ opacity: 1, y: 0 }} className="ml-auto text-[9px] font-semibold text-red-300/80 tabular-nums">
+                        {formatCrowdAmount(crowdBets.banker)}&nbsp;&nbsp;{crowdBankerPct}%
+                      </motion.span>
+                    </AnimatePresence>
                   </div>
                   <div className="w-full h-1 bg-[#1a0608] rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-[#ef4444] to-[#b91c1c] rounded-full transition-all duration-700" style={{ width: `${bankerPct}%` }} />
+                    <div className="h-full bg-gradient-to-r from-[#ef4444] to-[#b91c1c] rounded-full transition-all duration-700" style={{ width: `${crowdBankerPct}%` }} />
                   </div>
                 </div>
               </button>
