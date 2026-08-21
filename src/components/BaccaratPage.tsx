@@ -229,6 +229,13 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
   }, [countdown, serverPhase]);
 
 
+  // Keep betAmounts in a ref to avoid stale closures in the sync interval effect
+  const betAmountsRef = useRef(betAmounts);
+  useEffect(() => {
+    betAmountsRef.current = betAmounts;
+  }, [betAmounts]);
+
+
   // ── Sync to Live Worker API ───────────────────────────────────────────────
   useEffect(() => {
     let active = true;
@@ -290,6 +297,14 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
         if (prevPhaseRef.current !== data.phase) {
           const oldPhase = prevPhaseRef.current;
           prevPhaseRef.current = data.phase;
+
+          const isOldBetting = oldPhase === 'BETTING_OPEN' || oldPhase === 'LAST_CALL' || oldPhase === '';
+          const isNewBetting = data.phase === 'BETTING_OPEN' || data.phase === 'LAST_CALL';
+
+          // When transitioning away from betting, lock/confirm the bets automatically
+          if (isOldBetting && !isNewBetting) {
+            setPlacedBets({ ...betAmountsRef.current });
+          }
 
           if (data.phase === 'BETTING_OPEN') {
             playSfx('BET_OPEN');
