@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  ArrowLeft,
-  Share2,
+  Bell,
+  Crown,
+  Plus,
   Home,
   Gamepad2,
   Tv,
@@ -17,6 +18,9 @@ import {
   TrendingUp,
   Award
 } from 'lucide-react';
+
+const LOGO_URL = 'https://zdveyurydayysazasvdq.supabase.co/storage/v1/object/public/assets/icon.png';
+const AVATAR_URL = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
 
 interface ParlaysPageProps {
   onBackToHome: () => void;
@@ -238,30 +242,68 @@ export const ParlaysPage: React.FC<ParlaysPageProps> = ({ onBackToHome, onOpenBa
     <div className="min-h-screen bg-[#090b0e] text-white flex flex-col font-sans relative pb-28 select-none">
       
       {/* ── Header ── */}
-      <header className="px-4 py-4 flex items-center justify-between border-b border-zinc-900 bg-[#090b0e] sticky top-0 z-40">
-        <button
-          onClick={onBackToHome}
-          className="flex items-center justify-center p-2 rounded-lg bg-zinc-900/60 hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors cursor-pointer"
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </button>
+      <header className="w-full bg-black px-4 md:px-8 py-4 flex items-center justify-between border-b border-zinc-900 sticky top-0 z-40">
+        {/* Left: Brand Logo & Navigation Links */}
+        <div className="flex items-center gap-10">
+          {/* Brand Logo with back-to-home */}
+          <button
+            onClick={onBackToHome}
+            className="flex items-center cursor-pointer select-none"
+          >
+            <img
+              src={LOGO_URL}
+              alt="BETLOG"
+              referrerPolicy="no-referrer"
+              className="h-7 md:h-8 object-contain"
+            />
+          </button>
 
-        <div className="flex items-center gap-1.5">
-          <span className="text-white font-extrabold text-lg tracking-wide uppercase">BETLOG</span>
-          <span className="w-2 h-2 rounded-full bg-amber-400" />
+          {/* Desktop Navigation Links */}
+          <nav className="hidden md:flex items-center gap-7 text-[15px] font-medium text-zinc-400">
+            <button onClick={onBackToHome} className="hover:text-white transition-colors cursor-pointer">Games</button>
+            <button onClick={onOpenBaccarat} className="hover:text-white transition-colors cursor-pointer">Live Casino</button>
+            <button className="text-white font-semibold transition-colors cursor-pointer">Sports</button>
+            <button onClick={onBackToHome} className="hover:text-white transition-colors cursor-pointer">Bonanza</button>
+            <button onClick={onBackToHome} className="hover:text-white transition-colors cursor-pointer">Promos</button>
+            <button onClick={onBackToHome} className="text-amber-400 flex items-center gap-1 font-semibold hover:text-amber-300 transition-colors cursor-pointer">
+              <Crown className="w-4 h-4 fill-amber-400 text-amber-400" />
+              <span>VIP</span>
+            </button>
+          </nav>
         </div>
 
-        <h1 className="text-sm font-black tracking-wide text-zinc-400 bg-zinc-900/50 px-3 py-1 rounded-full uppercase">
-          Parlay Simulator
-        </h1>
+        {/* Right: Balance, Notifications, Profile */}
+        <div className="flex items-center gap-4">
+          {/* Balance Pill */}
+          <div className="bg-[#0f0e0a]/80 border border-amber-500/20 rounded-lg pl-3 pr-1 py-1 flex items-center gap-3">
+            <span className="text-amber-400 font-extrabold text-sm tracking-wide">
+              ₱1,250 CR
+            </span>
+            <button className="bg-amber-400 hover:bg-amber-500 text-black w-6 h-6 rounded flex items-center justify-center font-bold transition-all cursor-pointer">
+              <Plus className="w-4 h-4 stroke-[3]" />
+            </button>
+          </div>
 
-        <button className="flex items-center justify-center p-2 rounded-lg bg-zinc-900/60 text-amber-400 hover:text-amber-300 transition-colors cursor-pointer">
-          <Share2 className="w-5 h-5" />
-        </button>
+          {/* Bell Icon with red dot */}
+          <button className="text-zinc-400 hover:text-white transition-colors p-1 relative cursor-pointer">
+            <Bell className="w-5 h-5" />
+            <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-[#ef4444] rounded-full" />
+          </button>
+
+          {/* User Profile Avatar */}
+          <div onClick={onBackToHome} className="relative cursor-pointer">
+            <img
+              src={AVATAR_URL}
+              alt="User Profile"
+              referrerPolicy="no-referrer"
+              className="w-8 h-8 rounded-full object-cover ring-2 ring-emerald-500 ring-offset-2 ring-offset-black"
+            />
+          </div>
+        </div>
       </header>
 
       {/* ── Sub Navigation Tabs ── */}
-      <div className="w-full border-b border-zinc-900 bg-[#090b0e] px-4 py-2 sticky top-[61px] z-30 overflow-x-auto whitespace-nowrap">
+      <div className="w-full border-b border-zinc-900 bg-[#090b0e] px-4 py-2 sticky top-[73px] z-30 overflow-x-auto whitespace-nowrap">
         <div className="flex items-center justify-center gap-6 max-w-md mx-auto">
           {(['Home', 'Sports', 'Dota 2', 'My Parlays', 'Results'] as const).map((tab) => {
             const isActive = activeSubTab === tab;
