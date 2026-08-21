@@ -235,6 +235,12 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
     betAmountsRef.current = betAmounts;
   }, [betAmounts]);
 
+  // Keep placedBets in a ref to avoid stale closures in the sync interval effect
+  const placedBetsRef = useRef(placedBets);
+  useEffect(() => {
+    placedBetsRef.current = placedBets;
+  }, [placedBets]);
+
 
   // ── Sync to Live Worker API ───────────────────────────────────────────────
   useEffect(() => {
@@ -416,27 +422,32 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
               if (hasEitherPair)  hitSideBets.add('eitherPair');
               setWinSideBets(hitSideBets);
 
-              setPlacedBets(currPlaced => {
-                // Main bets
-                if (winner === 'PLAYER' && currPlaced.player > 0) winnings += currPlaced.player * 2;
-                if (winner === 'BANKER' && currPlaced.banker > 0) winnings += Math.floor(currPlaced.banker * 1.95);
-                if (winner === 'TIE'    && currPlaced.tie > 0)    winnings += currPlaced.tie * 9;
-                // Side bets
-                if (hasPP          && currPlaced.playerPair  > 0) winnings += currPlaced.playerPair  * 12; // 11:1
-                if (hasBP          && currPlaced.bankerPair  > 0) winnings += currPlaced.bankerPair  * 12;
-                if (hasPerfectPair && currPlaced.perfectPair > 0) winnings += currPlaced.perfectPair * 26; // 25:1
-                if (hasEitherPair  && currPlaced.eitherPair  > 0) winnings += currPlaced.eitherPair  * 6;  // 5:1
+              const currPlaced = placedBetsRef.current;
+              // Main bets
+              if (winner === 'PLAYER' && currPlaced.player > 0) winnings += currPlaced.player * 2;
+              if (winner === 'BANKER' && currPlaced.banker > 0) winnings += Math.floor(currPlaced.banker * 1.95);
+              if (winner === 'TIE'    && currPlaced.tie > 0)    winnings += currPlaced.tie * 9;
 
-                const mainBetTotal = currPlaced.player + currPlaced.banker + currPlaced.tie;
-                if (winnings > 0) {
-                  setBalance(prev => prev + winnings);
-                  setWinPayoutPulse(true);
-                  showToast(`🎉 Won ₱${winnings.toLocaleString()} CR! (${winner} WINS)`, 'success');
-                } else if (mainBetTotal > 0) {
-                  showToast(`No match. ${winner} WINS — better luck next round!`, 'error');
-                }
-                return currPlaced;
-              });
+              // TIE PUSH Refund: Return player/banker bets on Tie
+              if (winner === 'TIE') {
+                if (currPlaced.player > 0) winnings += currPlaced.player;
+                if (currPlaced.banker > 0) winnings += currPlaced.banker;
+              }
+
+              // Side bets
+              if (hasPP          && currPlaced.playerPair  > 0) winnings += currPlaced.playerPair  * 12; // 11:1
+              if (hasBP          && currPlaced.bankerPair  > 0) winnings += currPlaced.bankerPair  * 12;
+              if (hasPerfectPair && currPlaced.perfectPair > 0) winnings += currPlaced.perfectPair * 26; // 25:1
+              if (hasEitherPair  && currPlaced.eitherPair  > 0) winnings += currPlaced.eitherPair  * 6;  // 5:1
+
+              const mainBetTotal = currPlaced.player + currPlaced.banker + currPlaced.tie;
+              if (winnings > 0) {
+                setBalance(prev => prev + winnings);
+                setWinPayoutPulse(true);
+                showToast(`🎉 Won ₱${winnings.toLocaleString()} CR! (${winner} WINS)`, 'success');
+              } else if (mainBetTotal > 0) {
+                showToast(`No match. ${winner} WINS — better luck next round!`, 'error');
+              }
             }
           }
         } else {
