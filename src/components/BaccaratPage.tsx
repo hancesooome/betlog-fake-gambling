@@ -745,16 +745,16 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
             </AnimatePresence>
 
             {/* Bottom Live Game Felt Display: PLAYER and BANKER cards & scores */}
-            <div className="absolute bottom-3 md:bottom-4 left-0 right-0 px-4 md:px-6 flex items-end justify-between max-w-4xl mx-auto z-10">
+            <div className="absolute bottom-3 md:bottom-4 left-0 right-0 px-2 sm:px-4 md:px-6 flex items-end justify-between max-w-4xl mx-auto z-10">
               {/* PLAYER SIDE */}
               <div className="flex flex-col items-center">
                 <span className="text-[#38bdf8] font-black text-xs md:text-sm tracking-widest uppercase mb-1.5 md:mb-2 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
                   PLAYER
                 </span>
-                <div className="flex items-center gap-1.5 md:gap-2.5">
+                <div className="flex items-center gap-1 md:gap-2.5">
                   {/* Score Badge (Only visible when at least one card is flipped) */}
                   {playerCards.some(c => c.isFlipped) && (
-                    <div className="w-7 h-7 md:w-9 md:h-9 rounded-full bg-[#1e3a8a] border border-[#60a5fa] text-white font-black text-xs md:text-sm flex items-center justify-center shadow-lg">
+                    <div className="w-6 h-6 md:w-9 md:h-9 rounded-full bg-[#1e3a8a] border border-[#60a5fa] text-white font-black text-[11px] md:text-sm flex items-center justify-center shadow-lg">
                       {calculateScore(playerCards)}
                     </div>
                   )}
@@ -769,14 +769,14 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
                         /* For the 3rd card, outer container uses rotated dimensions so layout stays intact */
                         <div
                           key={`p-card-${index}`}
-                          className={isThird ? "w-[81px] h-[54px] md:w-[114px] md:h-[76px] flex items-center justify-center" : ""}
+                          className={isThird ? "w-[66px] h-[44px] md:w-[114px] md:h-[76px] flex items-center justify-center" : ""}
                         >
                           <motion.div
                             initial={{ x: 200, y: -250, rotate: 45, scale: 0.2, opacity: 0 }}
                             animate={{ x: 0, y: 0, rotate: isThird ? 90 : 0, scale: 1, opacity: 1 }}
                             exit={{ opacity: 0 }}
                             transition={{ type: 'spring', stiffness: 120, damping: 14 }}
-                            className="perspective relative w-[54px] h-[81px] md:w-[76px] md:h-[114px]"
+                            className="perspective relative w-[44px] h-[66px] md:w-[76px] md:h-[114px]"
                           >
                             <motion.div
                               animate={{ rotateY: card.isFlipped ? 180 : 0 }}
@@ -786,14 +786,14 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
                               {/* Card Back */}
                               <div className="absolute inset-0 bg-gradient-to-br from-blue-800 to-blue-950 rounded border-2 border-white/90 shadow-xl flex items-center justify-center backface-hidden">
                                 <div className="w-full h-full border border-blue-600/30 rounded flex items-center justify-center">
-                                  <span className="text-white/20 text-[6px] md:text-[9px] font-black tracking-widest rotate-45">BETLOG</span>
+                                  <span className="text-white/20 text-[5px] md:text-[9px] font-black tracking-widest rotate-45">BETLOG</span>
                                 </div>
                               </div>
                               {/* Card Front */}
-                              <div className="absolute inset-0 bg-white rounded border border-zinc-300 shadow-xl flex flex-col justify-between p-1.5 select-none rotate-y-180 backface-hidden">
-                                <div className="text-[10px] md:text-sm font-extrabold leading-none text-black">{card.value}</div>
-                                <div className={`text-base md:text-2xl self-center leading-none ${card.color}`}>{card.suit}</div>
-                                <div className="text-[10px] md:text-sm font-extrabold leading-none self-end rotate-180 text-black">{card.value}</div>
+                              <div className="absolute inset-0 bg-white rounded border border-zinc-300 shadow-xl flex flex-col justify-between p-1 select-none rotate-y-180 backface-hidden">
+                                <div className="text-[9px] md:text-sm font-extrabold leading-none text-black">{card.value}</div>
+                                <div className={`text-sm md:text-2xl self-center leading-none ${card.color}`}>{card.suit}</div>
+                                <div className="text-[9px] md:text-sm font-extrabold leading-none self-end rotate-180 text-black">{card.value}</div>
                               </div>
                             </motion.div>
                           </motion.div>
@@ -809,7 +809,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
                 <span className="text-[#ef4444] font-black text-xs md:text-sm tracking-widest uppercase mb-1.5 md:mb-2 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
                   BANKER
                 </span>
-                <div className="flex items-center gap-1.5 md:gap-2.5">
+                <div className="flex items-center gap-1 md:gap-2.5">
                   <AnimatePresence>
                     {bankerCards.map((card, index) => {
                       if (!card.isDealt) return null;
@@ -818,14 +818,14 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
                         /* For the 3rd card, outer container uses rotated dimensions so layout stays intact */
                         <div
                           key={`b-card-${index}`}
-                          className={isThird ? "w-[81px] h-[54px] md:w-[114px] md:h-[76px] flex items-center justify-center" : ""}
+                          className={isThird ? "w-[66px] h-[44px] md:w-[114px] md:h-[76px] flex items-center justify-center" : ""}
                         >
                           <motion.div
                             initial={{ x: 100, y: -250, rotate: 45, scale: 0.2, opacity: 0 }}
                             animate={{ x: 0, y: 0, rotate: isThird ? 90 : 0, scale: 1, opacity: 1 }}
                             exit={{ opacity: 0 }}
                             transition={{ type: 'spring', stiffness: 120, damping: 14 }}
-                            className="perspective relative w-[54px] h-[81px] md:w-[76px] md:h-[114px]"
+                            className="perspective relative w-[44px] h-[66px] md:w-[76px] md:h-[114px]"
                           >
                             <motion.div
                               animate={{ rotateY: card.isFlipped ? 180 : 0 }}
@@ -835,14 +835,14 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
                               {/* Card Back */}
                               <div className="absolute inset-0 bg-gradient-to-br from-red-800 to-red-950 rounded border-2 border-white/90 shadow-xl flex items-center justify-center backface-hidden">
                                 <div className="w-full h-full border border-red-600/30 rounded flex items-center justify-center">
-                                  <span className="text-white/20 text-[6px] md:text-[9px] font-black tracking-widest rotate-45">BETLOG</span>
+                                  <span className="text-white/20 text-[5px] md:text-[9px] font-black tracking-widest rotate-45">BETLOG</span>
                                 </div>
                               </div>
                               {/* Card Front */}
-                              <div className="absolute inset-0 bg-white rounded border border-zinc-300 shadow-xl flex flex-col justify-between p-1.5 select-none rotate-y-180 backface-hidden">
-                                <div className="text-[10px] md:text-sm font-extrabold leading-none text-black">{card.value}</div>
-                                <div className={`text-base md:text-2xl self-center leading-none ${card.color}`}>{card.suit}</div>
-                                <div className="text-[10px] md:text-sm font-extrabold leading-none self-end rotate-180 text-black">{card.value}</div>
+                              <div className="absolute inset-0 bg-white rounded border border-zinc-300 shadow-xl flex flex-col justify-between p-1 select-none rotate-y-180 backface-hidden">
+                                <div className="text-[9px] md:text-sm font-extrabold leading-none text-black">{card.value}</div>
+                                <div className={`text-sm md:text-2xl self-center leading-none ${card.color}`}>{card.suit}</div>
+                                <div className="text-[9px] md:text-sm font-extrabold leading-none self-end rotate-180 text-black">{card.value}</div>
                               </div>
                             </motion.div>
                           </motion.div>
@@ -853,7 +853,7 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
 
                   {/* Score Badge (Only visible when at least one card is flipped) */}
                   {bankerCards.some(c => c.isFlipped) && (
-                    <div className="w-7 h-7 md:w-9 md:h-9 rounded-full bg-[#7f1d1d] border border-[#f87171] text-white font-black text-xs md:text-sm flex items-center justify-center shadow-lg">
+                    <div className="w-6 h-6 md:w-9 md:h-9 rounded-full bg-[#7f1d1d] border border-[#f87171] text-white font-black text-[11px] md:text-sm flex items-center justify-center shadow-lg">
                       {calculateScore(bankerCards)}
                     </div>
                   )}
