@@ -356,33 +356,85 @@ export const BaccaratPage: React.FC<BaccaratPageProps> = ({ onBackToHome, onOpen
             // Flip cards one by one
             const pMapped = data.playerCards.map(mapCard);
             const bMapped = data.bankerCards.map(mapCard);
-            // Ensure all are marked dealt
-            pMapped.forEach((c: any) => c.isDealt = true);
-            bMapped.forEach((c: any) => c.isDealt = true);
+
+            // Initially, only the first 2 cards of both Player and Banker are dealt
+            pMapped.forEach((c: any, idx: number) => {
+              if (idx < 2) c.isDealt = true;
+            });
+            bMapped.forEach((c: any, idx: number) => {
+              if (idx < 2) c.isDealt = true;
+            });
+
             setPlayerCards(pMapped);
             setBankerCards(bMapped);
 
-            // Stagger flips
+            // Stagger flips of the first 2 cards, and deal + flip the 3rd card later
             pMapped.forEach((c: any, idx: number) => {
-              setTimeout(() => {
-                playSfx('CARD_FLIP');
-                setPlayerCards(curr => {
-                  const copy = [...curr];
-                  if (copy[idx]) copy[idx] = { ...copy[idx]!, isFlipped: true };
-                  return copy;
-                });
-              }, idx * 600);
+              if (idx < 2) {
+                // Card 0 and 1
+                setTimeout(() => {
+                  playSfx('CARD_FLIP');
+                  setPlayerCards(curr => {
+                    const copy = [...curr];
+                    if (copy[idx]) copy[idx] = { ...copy[idx]!, isFlipped: true };
+                    return copy;
+                  });
+                }, idx * 600);
+              } else {
+                // 3rd Card (idx == 2): Deal it face-down after first 2 cards of both sides flip (e.g. 1200ms)
+                setTimeout(() => {
+                  playSfx('CARD_DEAL');
+                  setPlayerCards(curr => {
+                    const copy = [...curr];
+                    if (copy[idx]) copy[idx] = { ...copy[idx]!, isDealt: true };
+                    return copy;
+                  });
+                }, 1200);
+
+                // Flip it 600ms later (e.g. 1800ms)
+                setTimeout(() => {
+                  playSfx('CARD_FLIP');
+                  setPlayerCards(curr => {
+                    const copy = [...curr];
+                    if (copy[idx]) copy[idx] = { ...copy[idx]!, isFlipped: true };
+                    return copy;
+                  });
+                }, 1800);
+              }
             });
 
             bMapped.forEach((c: any, idx: number) => {
-              setTimeout(() => {
-                playSfx('CARD_FLIP');
-                setBankerCards(curr => {
-                  const copy = [...curr];
-                  if (copy[idx]) copy[idx] = { ...copy[idx]!, isFlipped: true };
-                  return copy;
-                });
-              }, idx * 600 + 300);
+              if (idx < 2) {
+                // Card 0 and 1
+                setTimeout(() => {
+                  playSfx('CARD_FLIP');
+                  setBankerCards(curr => {
+                    const copy = [...curr];
+                    if (copy[idx]) copy[idx] = { ...copy[idx]!, isFlipped: true };
+                    return copy;
+                  });
+                }, idx * 600 + 300);
+              } else {
+                // 3rd Card (idx == 2): Deal it face-down after Player 3rd card is dealt (e.g. 2400ms)
+                setTimeout(() => {
+                  playSfx('CARD_DEAL');
+                  setBankerCards(curr => {
+                    const copy = [...curr];
+                    if (copy[idx]) copy[idx] = { ...copy[idx]!, isDealt: true };
+                    return copy;
+                  });
+                }, 2400);
+
+                // Flip it 600ms later (e.g. 3000ms)
+                setTimeout(() => {
+                  playSfx('CARD_FLIP');
+                  setBankerCards(curr => {
+                    const copy = [...curr];
+                    if (copy[idx]) copy[idx] = { ...copy[idx]!, isFlipped: true };
+                    return copy;
+                  });
+                }, 3000);
+              }
             });
 
           } else if (data.phase === 'RESULT') {
